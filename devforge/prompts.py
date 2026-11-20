@@ -74,13 +74,15 @@ RESEARCHER_SYSTEM = (
 )
 
 REVIEWER_SYSTEM = (
-    "You are the Reviewer of DevForge AI. You receive a user request and the files that were "
-    "written for it. Report ONLY real defects: logic that is wrong, requested features that are "
-    "missing, references to ids/functions/files that do not exist, or code that would crash. Do "
-    "NOT report style, naming or optional improvements.\n"
-    "Output format, one line per defect (maximum 3):\n"
-    "- path/to/file.ext: what is wrong and what to change\n"
-    "If there are no real defects, output exactly: LGTM"
+    "You are the Reviewer of DevForge AI. You receive a user request and the logic files (JavaScript / "
+    "Python) written for it. Report ONLY real bugs you can point at: logic that is wrong, code that would "
+    "crash, or a requested behaviour whose code is clearly wrong. Do NOT report style, naming, missing "
+    "comments, optional improvements, HTML/CSS layout, or anything you are not sure about. Most good code "
+    "has no bugs - answering LGTM is normal and expected.\n"
+    "Output format, one line per bug (maximum 2). You MUST copy the exact buggy line from the file "
+    "between backticks:\n"
+    "- path/to/file.ext: `exact line copied from the file` - what is wrong and what to change\n"
+    "If there are no real bugs, output exactly: LGTM"
 )
 
 PLANNER_SYSTEM = (

@@ -21,14 +21,24 @@ Chat and Code keep **separate histories per folder** (stored in `<folder>/.devfo
 
 | Agent | Model | Job |
 |---|---|---|
-| Router | `qwen2.5-coder:1.5b` | decides build / ask / off-topic in Code mode |
-| Researcher | `qwen2.5:7b` | offline design brief from your request + project docs |
-| Planner | `deepseek-coder:6.7b` | file plan |
+| Router | `qwen2.5-coder:7b` | decides build / ask / off-topic in Code mode |
+| Researcher | `qwen2.5-coder:7b` | offline design brief from your request + project docs |
+| Designer | `qwen2.5-coder:7b` | picks one of six ready-made themes for a new website |
+| Planner | `qwen2.5-coder:7b` | file plan |
 | Coder | `qwen2.5-coder:7b` | writes each file, answers project questions, powers Chat |
-| Reviewer | `qwen2.5-coder:7b` | finds real defects; Coder fixes them |
-| Tester | `codegemma:2b` | unit tests (Python) |
-| Debugger | `qwen2.5-coder:1.5b` | fixes failing checks/tests (2 rounds) |
+| Reviewer | `qwen2.5-coder:7b` | reviews JS/Python logic; a finding counts only if it quotes real code |
+| Tester | `qwen2.5-coder:7b` | unit tests (Python) |
+| Debugger | `qwen2.5-coder:7b` | fixes failing checks/tests (2 rounds) |
 | RAG embeddings | `nomic-embed-text` | vector half of hybrid search |
+
+Every agent has its own role, prompt and model setting. By default they all use the same strong
+coder model: on a 4 GB GPU, switching between several 4-5 GB models reloads one from disk each
+time, and the 1.5B-2B models were too weak to debug code or write tests.
+
+**Written by code, not by a model** (so they always work): `theme.css` (six themes, both light and
+dark palettes, mobile menu styles), `theme-toggle.js` (light/dark switch), `site.js` (hamburger menu
+and active nav link), the colour converter that turns fixed colours in `styles.css` into theme
+colours, and the HTML/CSS/JS mismatch check that sends real mismatches to the Debugger.
 
 Change them in `devforge/config.py` (`ENABLE_RESEARCH` / `ENABLE_REVIEW` switch the two optional
 steps off for speed). If a model is missing, the closest installed one is used. Without an

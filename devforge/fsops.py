@@ -441,3 +441,108 @@ def find_run_target(root: str) -> Optional[Tuple[str, str]]:
         if fn.endswith(".html"):
             return "browser", fn
     return None
+
+
+# ---------------------------------------------------------------- HTML / CSS / JS consistency
+_JS_ID = re.compile(r"""getElementById\(\s*['"]([\w-]+)['"]\s*\)|querySelector(?:All)?\(\s*['"]#([\w-]+)['"]""")
+_JS_CLASS_SEL = re.compile(r"""querySelector(?:All)?\(\s*['"]\.([\w-]+)['"]\s*\)|getElementsByClassName\(\s*['"]([\w-]+)['"]""")
+_JS_CLASS_SET = re.compile(r"""classList\.(?:add|toggle)\(\s*['"]([\w-]+)['"]""")
+_JS_VAR_CLASS_SET = re.compile(r"""([\w$]+)\.classList\.(?:add|toggle)\(\s*['"]([\w-]+)['"]""")
+_JS_TARGET = re.compile(r"""(?:const|let|var)\s+([\w$]+)\s*=\s*document\.(?:querySelector\(\s*['"]([.#][\w-]+)['"]\s*\)|getElementById\(\s*['"]([\w-]+)['"]\s*\))""")
+_KIT_FILES = {"site.js", "theme-toggle.js"}
+_THEMEISH = re.compile(r"theme|dark|light|night|day-?mode", re.I)          # written by code, always consistent
+
+
+def consistency_check(root: str, rels: List[str]) -> List[Dict]:
+    """Cross-file check a small model often gets wrong: JavaScript that uses an id or class the HTML
+    does not have, or that switches on a class no CSS rule styles (e.g. a menu that never opens).
+    Only clear-cut cases are reported, so the Debugger is never sent after a false alarm.
+    Returns [{file, error}] for the JavaScript files among `rels`."""
+    html_files = [r for r in rels if r.endswith((".html", ".htm"))]
+    js_files = [r for r in rels if r.endswith(".js") and os.path.basename(r) not in _KIT_FILES]
+    if not js_files:
+        return []
+    # look at every page / stylesheet in the folder, not only the files written in this build
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if not d.startswith(".") and d not in ("node_modules", "__pycache__", "venv")]
+        for fn in fns:
+            rel = os.path.relpath(os.path.join(dp, fn), root).replace("\\", "/")
+            if fn.endswith((".html", ".htm")) and rel not in html_files:
+                html_files.append(rel)
+    if not html_files:
+        return []
+    html = "\n".join(read_file(root, r, 400_000) or "" for r in html_files)
+    css = ""
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if not d.startswith(".") and d not in ("node_modules", "__pycache__", "venv")]
+        css += "\n".join(open(os.path.join(dp, f), encoding="utf-8", errors="replace").read()
+                         for f in fns if f.endswith(".css"))
+    css += "\n" + re.sub(r"(?s)<style[^>]*>(.*?)</style>", lambda m: m.group(1), " ".join(
+        re.findall(r"(?is)<style[^>]*>.*?</style>", html)))
+    ids = set(re.findall(r"""\bid\s*=\s*["']([^"']+)["']""", html))
+    classes = set()
+    for c in re.findall(r"""\bclass\s*=\s*["']([^"']+)["']""", html):
+        classes.update(c.split())
+    css_classes = set(re.findall(r"\.(-?[_a-zA-Z][\w-]*)", css))
+    out: List[Dict] = []
+    kit = os.path.exists(os.path.join(root, "site.js"))              # site.js runs the menu, whatever a script does
+    switch = os.path.exists(os.path.join(root, "theme-toggle.js"))   # ...and theme-toggle.js the light/dark theme
+    for rel in js_files:
+        js = read_file(root, rel, 400_000) or ""
+        made = js_made_names(js)                  # ids/classes the script creates itself
+        problems = []
+        for a, b in _JS_ID.findall(js):
+            name = a or b
+            if name not in ids and name not in made and not (switch and _THEMEISH.search(name)):
+                problems.append(f'it looks for id "{name}" but no element in the HTML has id="{name}"')
+        for a, b in _JS_CLASS_SEL.findall(js):
+            name = a or b
+            if name not in classes and name not in made:
+                problems.append(f'it looks for class "{name}" but no element in the HTML has that class')
+        targets = _js_targets(js)
+        for var, name in _JS_VAR_CLASS_SET.findall(js):
+            if name in ("hidden", "visible", "selected", "checked", "disabled", "loading"):
+                continue
+            sel = targets.get(var)
+            if kit and sel in (".nav-links", "#menu-btn", ".menu-btn", ".nav-toggle", ".hamburger"):
+                continue
+            if switch and _THEMEISH.search(name + " " + (sel or "")):     # old theme code, now dead
+                continue
+            if name not in css_classes:
+                problems.append(f'it switches on class "{name}" but no CSS rule styles ".{name}", so nothing visible changes')
+            elif sel and not _styled_on(css, sel, name):
+                problems.append(f'it switches on class "{name}" on {sel} but no CSS rule styles "{sel}.{name}" '
+                                f'(or a plain ".{name}"), so nothing visible changes')
+        problems = list(dict.fromkeys(problems))
+        if problems:
+            out.append({"file": rel, "error": "Mismatch with the HTML/CSS: " + "; ".join(problems[:5]) +
+                        ". Use only ids and classes that exist in the HTML, or add the missing CSS rule."})
+    return out
+
+
+def _js_targets(js: str) -> Dict[str, str]:
+    """variable -> the simple selector it was found with, e.g. {'navLinks': '.nav-links', 'btn': '#menu-btn'}."""
+    out = {}
+    for var, sel, el_id in _JS_TARGET.findall(js):
+        out[var] = sel or f"#{el_id}"
+    return out
+
+
+def _styled_on(css: str, sel: str, cls: str) -> bool:
+    """Is there a rule for `sel.cls` (either order), or a plain `.cls` rule not tied to another element?"""
+    s, c = re.escape(sel), re.escape("." + cls)
+    if re.search(s + r"(?:[.#][\w-]+)*" + c + r"(?![\w-])", css) or re.search(c + r"(?:[.#][\w-]+)*" + s + r"(?![\w-])", css):
+        return True
+    return bool(re.search(r"(?:^|[\s,{}>+~])" + c + r"(?![\w-])", css))
+
+
+def js_made_names(js: str) -> set:
+    """ids / classes a script creates itself (createElement + id/className, or HTML in strings)."""
+    names = set(re.findall(r"""\.id\s*=\s*['"`]([\w-]+)['"`]""", js))
+    for c in re.findall(r"""className\s*=\s*['"`]([^'"`]+)['"`]""", js):
+        names.update(c.split())
+    for c in re.findall(r"""class=\\?["']([^"'\\]+)""", js):
+        names.update(c.split())
+    names.update(re.findall(r"""id=\\?["']([\w-]+)""", js))
+    names.update(re.findall(r"""classList\.add\(\s*['"]([\w-]+)['"]""", js))
+    return names

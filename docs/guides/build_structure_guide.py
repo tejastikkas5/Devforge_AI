@@ -88,8 +88,9 @@ s += folder("3.2  devforge/  (the main app)", "This is the real project. Everyth
     ["llm.py", "Talks to Ollama (the local AI server). Sends prompts, streams answers, makes embeddings, and picks an installed model."],
     ["prompts.py", "The written instructions for each agent (Planner, Coder, Tester, Debugger, Reviewer...)."],
     ["fsops.py", "File tools. Writes files safely (only inside the project folder), checks HTML/CSS/JS/Python, "
+                 "checks that the JavaScript only uses ids/classes that exist in the HTML/CSS, "
                  "repairs broken links, and runs code with a time limit."],
-    ["themes.py", "Six ready-made designs for the <i>websites DevForge builds</i>, and their light/dark switch. The Designer agent just picks one."],
+    ["themes.py", "The <b>site kit</b>, written by code so it always works: six ready-made designs for the <i>websites DevForge builds</i> (both light and dark palettes, mobile menu styles), the light/dark switch, site.js (hamburger menu, active nav link) and the colour converter that turns fixed colours into theme colours. The Designer agent just picks a design."],
     ["skills.py", "Skills: your own instructions saved per project (skills/*.md), used automatically or by typing /name."],
     ["memory.py", "Project memory. Saves short facts and searches old chats so a new chat remembers earlier ones."],
     ["store.py", "Saves every chat of a project (each message with its time), remembers recently opened folders, and saves app settings such as your light/dark choice (in ~/.devforge/)."],
@@ -146,7 +147,8 @@ s += folder("3.7  samples/", "Real output from our test runs. Good to show in th
 ])
 
 s += folder("3.8  tests/", "Automated checks that prove the app works.", [
-    ["test_core.py", "51 tests: reading files from AI replies, RAG search, routing, memory, skills, safe file writing, the reply timer, and the full "
+    ["test_core.py", "55 tests: reading files from AI replies, RAG search, routing, memory, skills, safe file writing, the reply timer, the site kit "
+                     "(colour converter, mismatch check, repairing an existing site), the proof-based Reviewer, and the full "
                      "agent pipeline with a fake AI. Run: <b>python -m unittest tests.test_core</b> (all pass)."],
 ])
 
@@ -175,7 +177,10 @@ s += [P("5. If the judge asks: \"Where did you implement ...?\"", h2), table([
     ["Question", "Answer: file and name"],
     ["RAG (retrieval)", "devforge/rag.py, class CodeIndex; used in engine.py (index().context())."],
     ["Agents / Supervisor", "engine.py (_build) and prompts.py."],
-    ["Different model per agent", "config.py (ROLE_MODELS) and llm.py (resolve_model)."],
+    ["Model per agent", "config.py (ROLE_MODELS: one setting per role, all qwen2.5-coder 7B by default) and llm.py (resolve_model)."],
+    ["Mobile menu, colours that follow the theme", "themes.py (SITE_JS, theme_colours), applied by engine.py (_repair_site)."],
+    ["HTML/CSS/JS mismatch check", "fsops.py: consistency_check, used in engine.py (_verify)."],
+    ["Reviewer that cannot invent bugs", "engine.py: _review keeps a finding only if it quotes real code (_proven)."],
     ["Self-healing fix loop", "engine.py: _verify and _debug, up to 2 rounds."],
     ["Running / checking code", "fsops.py: static_check, run_python, run_command."],
     ["Safety (stay inside the folder)", "fsops.py: safe_join blocks ../ and drive letters."],
@@ -202,8 +207,9 @@ s += [P("6. Report vs. the code (so you are not surprised)", h2), table([
     ["Large models (16B-24B)", "Our laptop uses 1.5B-7B models; bigger ones can be set in config.py"],
     ["Tree-sitter planned for C and JavaScript", "Full AST for Python only; other files use line windows"],
 ], (85*mm, 85*mm)), Spacer(1, 6),
-    P("Models in use: deepseek-coder 6.7B (Planner), qwen2.5-coder 7B (Coder, Reviewer), qwen2.5 7B (Researcher, Designer), "
-      "codegemma 2B (Tester), qwen2.5-coder 1.5B (Router, Debugger, chat titles, memory), nomic-embed-text (RAG vectors).")]
+    P("Models in use: every agent keeps its own role and model setting in config.py, and by default all of them use "
+      "qwen2.5-coder 7B, plus nomic-embed-text for RAG vectors. On our 4 GB GPU, switching between several 4-5 GB models "
+      "reloaded one from disk each time, and the 1.5B-2B models were too weak to debug code or write tests.")]
 
 
 def footer(c, d):

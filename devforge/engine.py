@@ -41,6 +41,9 @@ _ASK_START = re.compile(
 _PROJECT_REF = re.compile(r"\b(project|code|codebase|files?|fo+lders?|directory|app|application|website|site|page|functions?|class(es)?|script|repo|readme|this|here|\w+\.(py|js|html|css|json|md))\b", re.I)
 _FIX_REQ = re.compile(r"\b(fix|bug|bugs|error|errors|broken|not working|doesn'?t work|does not work|isn'?t working|won'?t (work|load|open|change)|crash(es|ed)?|fails?|failing|wrong|problem|issue|not (changing|updating|showing|displaying|responding)|doesn'?t (change|update|show|display|respond))\b", re.I)
 _TOGGLE_REQ = re.compile(r"\b(toggle|switch(er)?|switching)\b.{0,40}\b(theme|dark|light)\b|\b(dark|light)\b.{0,40}\b(toggle|switch(er)?)\b|\btheme (toggle|switch)", re.I)
+# things the code-written site kit handles instantly (no model): theme colours, the mobile menu
+_KIT_REQ = re.compile(r"\b(theme colou?rs?|dark mode colou?rs?|colou?rs? (in|for) dark mode|hamburger|mobile menu|"
+                      r"(menu|side ?bar|navbar|nav) (button )?(is )?(not|doesn'?t|does not|won'?t) (open|opening|work|working|show))\b", re.I)
 _REDESIGN_REQ = re.compile(r"\b(redesign|re-design|restyle|new (theme|look|design)|change (the )?(theme|design|look|colou?rs?|style)|(make|give) it (look )?(more )?(modern|fancy|beautiful|stylish|professional|pretty)|make (the )?(design|ui|site|website|page|look)( look)? (more )?(modern|fancy|beautiful|stylish|professional|pretty|better)|better (design|ui|look)|improve (the )?(design|ui|look)|modernize|(dark|light|glass|elegant|vibrant|fresh) (theme|design|style))\b", re.I)
 _ROUTE_TEXT = {
     "new": "New project - full team: Researcher, Designer, Planner, Coder, Reviewer",
@@ -229,6 +232,8 @@ class Engine:
         """BUILD | ASK | OFFTOPIC. Heuristics first, small LLM for the ambiguous middle."""
         if _GREETING.match(text):
             return "OFFTOPIC"
+        if _KIT_REQ.search(text):
+            return "BUILD"        # theme colours / mobile menu: handled instantly by the site kit
         if _ASK_START.match(text) and _PROJECT_REF.search(text):
             return "ASK"          # "what does this project do?" never needs the small model's opinion
         has_verb, has_noun = bool(_BUILD_VERBS.search(text)), bool(_TECH_NOUNS.search(text))
@@ -305,8 +310,7 @@ class Engine:
         if config.ENABLE_DESIGNER and self._wants_design(request, idx, kind):
             self._stage("Designer", "designer", "Choosing a visual theme...")
             design = self._design(request, brief, skills)
-            fsops.write_file(self.root, "theme.css", themes.render_css(design["theme"], design["accent"]))
-            self.emit("file", path="theme.css")
+            self._write_site_kit(design["theme"], design["accent"], request)
             steps.append(f"Designer ({self.models()['designer']}): theme '{design['theme']}'")
 
         # 1) Planner -------------------------------------------------------
@@ -391,24 +395,29 @@ class Engine:
 
         # 2b) Cheap deterministic repairs, then the Reviewer ---------------------
         html_files = [r for r in written if r.endswith((".html", ".htm"))]
-        self._themed = bool(design)
-        fixes = self._repair_html(html_files)
+        self._themed = bool(design) or self._has_devforge_theme()
+        fixes = self._repair_html(html_files) + self._repair_site(written)
         if fixes:
             steps.append("Auto-fix: " + ", ".join(fixes))
-        for r in html_files:
-            contents[r] = fsops.read_file(self.root, r, 400_000) or contents[r]
+        for r in written:
+            if r.endswith((".html", ".htm", ".css")):
+                contents[r] = fsops.read_file(self.root, r, 400_000) or contents[r]
 
         review_rows = ""
-        if config.ENABLE_REVIEW:
-            self._stage("Reviewer", "reviewer", "Reviewing the code...")
-            issues = self._review(request, written, contents)
+        logic = [r for r in written if r.endswith((".js", ".py")) and not os.path.basename(r).startswith("test_")]
+        if config.ENABLE_REVIEW and logic:          # HTML/CSS consistency is checked by code, not by the model
+            self._stage("Reviewer", "reviewer", "Reviewing the logic...")
+            issues = self._review(request, logic, contents)
             if not issues:
-                review_rows = "- ✅ review: no real defects found"
+                review_rows = "- ✅ review: no proven defects - nothing rewritten"
             else:
                 fixed = self._apply_review(request, issues, plan, contents)
                 review_rows = "\n".join(f"- 🔎 `{f}` - {msg}" for f, msg in issues) + \
-                    f"\n- {fixed} of {len(issues)} review finding(s) were fixed automatically"
-            steps.append(f"Reviewer ({self.models()['reviewer']}): {len(issues)} finding(s)")
+                    f"\n- {fixed} of {len(issues)} finding(s) fixed (each fix re-checked; a fix that broke the file was undone)"
+            dropped = getattr(self, "_review_dropped", 0)
+            if dropped:
+                review_rows += f"\n- {dropped} unproven finding(s) ignored (they did not quote real code)"
+            steps.append(f"Reviewer ({self.models()['reviewer']}): {len(issues)} proven finding(s)")
 
         # 3) Tester (Python logic only) ------------------------------------
         test_rel = None
@@ -445,11 +454,14 @@ class Engine:
         lines = []
         if summary:
             lines.append(summary.group(1).strip() + "\n")
-        all_files = (["theme.css"] if design else []) + written + ([test_rel] if test_rel else [])
-        lines.append("**Files**\n" + "\n".join(f"- `{r}`" for r in all_files))
+        kit = [f for f in ("theme.css", "theme-toggle.js", "site.js") if design and os.path.exists(os.path.join(self.root, f))]
+        all_files = kit + written + ([test_rel] if test_rel else [])
+        lines.append("**Files**\n" + "\n".join(f"- `{r}`" + (" - written by DevForge's code (always works)" if r in kit else "")
+                                               for r in all_files))
         if design:
             lines.append(f"**Design**\nTheme **{design['theme']}**" + (f", accent `{design['accent']}`" if design["accent"] else "")
-                         + (f" - {design['style']}" if design["style"] else ""))
+                         + (f" - {design['style']}" if design["style"] else "")
+                         + ("\n\nBuilt in: light/dark switch, mobile menu and active nav link." if "site.js" in kit else ""))
         lines.append("**Checks**\n" + verdict)
         if review_rows:
             lines.append("**Review**\n" + review_rows)
@@ -459,6 +471,58 @@ class Engine:
             lines.append(f"Press **Run** to {'open `' + target[1] + '` in your browser' if target[0] == 'browser' else 'run `' + target[1] + '`'}.")
         lines.append("<sub>" + " → ".join(steps) + "</sub>")
         return "\n\n".join(lines), {"files": written, "tests": test_rel, "ok": not problems}
+
+    # ------------------------------------------------------------ site kit (written by code, not by a model)
+    def _has_devforge_theme(self) -> bool:
+        return themes.is_devforge_theme(fsops.read_file(self.root, "theme.css", 300) or "")
+
+    def _write_site_kit(self, theme: str, accent: Optional[str], request: str = "") -> None:
+        """theme.css (+ both palettes and the switch when enabled) and site.js for a new website."""
+        if config.ENABLE_THEME_SWITCH:
+            pair = themes.dual_pair(theme)
+            low = request.lower()
+            if re.search(r"(default|start|begin)\w*\s+(in\s+|with\s+)?(a\s+)?dark|dark (by default|first)", low):
+                default = "dark"
+            elif re.search(r"(default|start|begin)\w*\s+(in\s+|with\s+)?(a\s+)?light|light (by default|first)", low):
+                default = "light"
+            else:
+                default = "dark" if themes.is_dark(theme) else "light"
+            fsops.write_file(self.root, "theme.css", themes.render_dual_css(pair["dark"], pair["light"], accent, default))
+            fsops.write_file(self.root, "theme-toggle.js", themes.toggle_js(default))
+            self.emit("file", path="theme-toggle.js")
+        else:
+            fsops.write_file(self.root, "theme.css", themes.render_css(theme, accent))
+        fsops.write_file(self.root, "site.js", themes.site_js())
+        self.emit("file", path="theme.css")
+        self.emit("file", path="site.js")
+
+    def _repair_site(self, written: List[str]) -> List[str]:
+        """Deterministic, idempotent: link the kit files into every page and turn fixed colours in the
+        page stylesheets into theme colours, so the light/dark switch recolours everything."""
+        if not self._has_devforge_theme():
+            return []
+        out: List[str] = []
+        pages = sorted(set(r for r in self.index()._outlines if r.endswith((".html", ".htm")))
+                       | {r for r in written if r.endswith((".html", ".htm"))})
+        for r in pages:
+            fsops.ensure_theme_link(self.root, r)
+            for js in ("theme-toggle.js", "site.js"):
+                if os.path.exists(os.path.join(self.root, js)):
+                    fsops.ensure_script_link(self.root, r, js)
+        css_files = sorted({r for r in self.index()._outlines if r.endswith(".css") and r != "theme.css"}
+                           | {r for r in written if r.endswith(".css") and r != "theme.css"})
+        n = 0
+        for r in css_files:
+            src = fsops.read_file(self.root, r, 300_000)
+            if not src:
+                continue
+            new, k = themes.theme_colours(src)
+            if k:
+                fsops.write_file(self.root, r, new)
+                n += k
+        if n:
+            out.append(f"turned {n} fixed colour(s) into theme colours")
+        return out
 
     def _repair_html(self, html_files: List[str]) -> List[str]:
         """Deterministic, idempotent repairs. Runs before the Reviewer and again before every
@@ -484,7 +548,7 @@ class Engine:
         has_html = any(r.endswith((".html", ".htm")) for r in idx._outlines)
         if not idx.has_files() or (not has_html and _WEB_REQ.search(request)):
             return "new"
-        if has_html and _TOGGLE_REQ.search(request):
+        if has_html and (_TOGGLE_REQ.search(request) or _KIT_REQ.search(request)):
             return "toggle"
         if _FIX_REQ.search(request):
             return "fix"
@@ -514,28 +578,29 @@ class Engine:
         fsops.write_file(self.root, "theme.css",
                          themes.render_dual_css(pair["dark"], pair["light"], cur["accent"], default))
         fsops.write_file(self.root, "theme-toggle.js", themes.toggle_js(default))
-        self.emit("file", path="theme.css")
-        self.emit("file", path="theme-toggle.js")
-        for r in html_files:
-            fsops.ensure_theme_link(self.root, r)
-            fsops.ensure_script_link(self.root, r, "theme-toggle.js")
+        fsops.write_file(self.root, "site.js", themes.site_js())
+        for f in ("theme.css", "theme-toggle.js", "site.js"):
+            self.emit("file", path=f)
         self._themed = True
-        verdict, problems = self._verify(html_files + ["theme-toggle.js"], None)
+        fixes = self._repair_site(html_files)               # links + fixed colours -> theme colours
+        js = sorted(r for r in idx._outlines if r.endswith(".js"))
+        verdict, problems = self._verify(html_files + [r for r in js if r not in ("theme-toggle.js", "site.js")]
+                                         + ["theme-toggle.js", "site.js"], None)
         self.index()
-        hard = [r for r in idx._outlines if r.endswith(".css") and r != "theme.css"
-                and re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", fsops.read_file(self.root, r, 100_000) or "")]
-        lines = ["Added a light / dark theme switch to your site.\n",
+        lines = ["Added a light / dark theme switch to your site, and the built-in mobile menu.\n",
                  "**Files**\n- `theme.css` - now holds both palettes "
-                 f"(dark: {pair['dark']}, light: {pair['light']})\n- `theme-toggle.js` - the switch; it remembers "
-                 "your choice in the browser\n" + "\n".join(f"- `{r}` - linked to both" for r in html_files),
+                 f"(dark: {pair['dark']}, light: {pair['light']}) and the mobile menu styles\n- `theme-toggle.js` - the "
+                 "switch; it remembers your choice in the browser\n- `site.js` - hamburger menu and the active nav link "
+                 "while scrolling\n" + "\n".join(f"- `{r}` - linked to all of them" for r in html_files),
                  f"**Design**\nThe site starts in **{default}** mode. Use the round button at the bottom-right "
-                 "(or your own theme button, which now works) to switch.",
+                 "(or your own theme button, which now works) to switch."
+                 + (f"\n\n{fixes[0][0].upper() + fixes[0][1:]} in your stylesheets, so every part follows the theme." if fixes else ""),
                  "**Checks**\n" + verdict]
-        if hard:
-            lines.append("Note: " + ", ".join(f"`{r}`" for r in hard) + " contains fixed colours, so those parts will "
-                         "not change with the theme. Ask me to \"use the theme colours in styles.css\" to convert them.")
-        lines.append("<sub>Supervisor: theme switch handled directly - no Planner or Coder needed</sub>")
-        return "\n\n".join(lines), {"files": ["theme.css", "theme-toggle.js"] + html_files, "ok": not problems}
+        if problems:
+            lines.append("Some problems remain (see above). You can ask me to fix them, e.g. *\"fix the error in "
+                         + problems[0]["file"] + "\"*.")
+        lines.append("<sub>Supervisor: theme switch, menu and colours handled directly by code - no Planner or Coder needed</sub>")
+        return "\n\n".join(lines), {"files": ["theme.css", "theme-toggle.js", "site.js"] + html_files, "ok": not problems}
 
     def _design(self, request: str, brief: str, skills: str = "") -> Dict[str, str]:
         hint = themes.suggest(request)
@@ -559,13 +624,29 @@ class Engine:
         raw = self._llm("reviewer", prompts.REVIEWER_SYSTEM, f"REQUEST:\n{request}\n\nFILES:\n{blob}",
                         temperature=0.1, num_predict=400, agent="Reviewer")
         issues: List[Tuple[str, str]] = []
+        self._review_dropped = 0
         for line in raw.splitlines():
             m = re.match(r"^\s*[-*\d.)]+\s*[`*]*([\w./\\-]+\.\w{1,6})[`*]*\s*[:\-]\s*(.+)$", line)
             if m:
                 path = m.group(1).replace("\\", "/")
                 if path in written and m.group(2).strip():
-                    issues.append((path, m.group(2).strip()[:300]))
+                    if self._proven(m.group(2), contents.get(path, "")):
+                        issues.append((path, m.group(2).strip()[:300]))
+                    else:
+                        self._review_dropped += 1
         return issues[:config.MAX_REVIEW_ISSUES]
+
+    @staticmethod
+    def _proven(finding: str, source: str) -> bool:
+        """A finding counts only if it quotes real code from the file (small models invent defects such
+        as 'the section is not completed'; those would cost a full rewrite for nothing)."""
+        norm = lambda t: re.sub(r"\s+", "", t)
+        src = norm(source)
+        for quote in re.findall(r"`([^`]{6,})`", finding):
+            q = norm(quote)
+            if len(q) >= 6 and q in src:
+                return True
+        return False
 
     def _apply_review(self, request: str, issues: List[Tuple[str, str]], plan: str,
                       contents: Dict[str, str]) -> int:
@@ -593,7 +674,11 @@ class Engine:
                     compile(new, rel, "exec")
                 except SyntaxError:
                     continue
+            before_ok = all(r["ok"] for r in fsops.static_check(self.root, [rel]))
             fsops.write_file(self.root, rel, new)
+            if before_ok and not all(r["ok"] for r in fsops.static_check(self.root, [rel])):
+                fsops.write_file(self.root, rel, old)        # the "fix" broke a working file: undo it
+                continue
             contents[rel] = new
             self.emit("file", path=rel)
             fixed += len(msgs)
@@ -603,12 +688,23 @@ class Engine:
     def _verify(self, written: List[str], test_rel: Optional[str]) -> Tuple[str, List[Dict]]:
         self.emit("stage", agent="Verifier", model="", text="Checking the result...")
         self._repair_html([r for r in written if r.endswith((".html", ".htm"))])
+        self._repair_site(written)
         problems: List[Dict] = []
         rows = []
         for r in fsops.static_check(self.root, written):
             rows.append(f"- {'✅' if r['ok'] else '❌'} `{r['file']}` - {r['message']}")
             if not r["ok"]:
                 problems.append({"file": r["file"], "error": r["message"]})
+        # cross-file check: ids / classes the JavaScript uses must exist in the HTML / CSS
+        bad = {p["file"] for p in problems}
+        scope = list(written)
+        if any(r.endswith((".html", ".htm")) for r in written):      # a rewritten page can break any script
+            scope += [r for r in self.index()._outlines if r.endswith(".js") and r not in scope]
+        for c in fsops.consistency_check(self.root, scope):
+            if c["file"] in bad:
+                continue
+            rows.append(f"- ❌ `{c['file']}` - {c['error'][:300]}")
+            problems.append(c)
         if test_rel and not any(p["file"].endswith(".py") for p in problems):
             res = fsops.run_python(self.root, test_rel, 30)
             tail = ((res["stderr"] or res["stdout"]).strip().splitlines() or [""])[-1]

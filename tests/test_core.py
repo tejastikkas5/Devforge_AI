@@ -127,7 +127,11 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual((sessions[0]["mode"], sessions[0]["title"]), ("code", "Test Chat Title"))
             self.assertEqual([m["role"] for m in eng.store.load(sessions[0]["id"])], ["user", "assistant"])
             models_used = {m for k, m in eng.client.calls if k not in ("title", "memory")}
-            self.assertEqual(models_used, {"qwen2.5:7b", "deepseek-coder:6.7b", "qwen2.5-coder:7b"})
+            self.assertEqual(models_used, {"qwen2.5-coder:7b"})                  # one model: no swaps on a 4 GB GPU
+            for f in ("theme-toggle.js", "site.js"):                                  # built-in switch + menu, by code
+                self.assertTrue(os.path.exists(os.path.join(d, f)), f)
+            with open(os.path.join(d, "theme.css"), encoding="utf-8") as f:
+                self.assertIn('data-theme="light"', f.read())
 
     def test_python_pipeline_with_debugger_fix(self):
         plan = "SUMMARY: add.\nFILES:\n- calc.py: add function\nNOTES:\n- x\n"
@@ -150,26 +154,32 @@ class PipelineTests(unittest.TestCase):
             with open(os.path.join(d, "calc.py")) as f:
                 self.assertIn("a + b", f.read())
 
-    def test_reviewer_finding_is_fixed_by_coder(self):
+    def _review_run(self, d, review_reply):
         fence = chr(96) * 3
-        def page(extra):
-            return fence + 'html' + chr(10) + '<!DOCTYPE html><html><body><h1>Shoes</h1>' + extra + '</body></html>' + chr(10) + fence
+        nl = chr(10)
+        buggy = nl.join(["function total(price, qty) {", "  let sum = price - qty;", "  return sum;", "}", ""])
+        good = buggy.replace("price - qty", "price * qty")
 
-        def coder_with_revision(user):
-            if 'REVIEW FINDINGS TO FIX' in user:
-                return page("<span id='cart-count'>0</span>")
-            return page('')
+        def coder_js(user):
+            return fence + "js" + nl + (good if "REVIEW FINDINGS TO FIX" in user else buggy) + fence
 
-        plan = chr(10).join(['SUMMARY: s.', 'FILES:', '- index.html: page', 'NOTES:', '- x', ''])
-        replies = [("Researcher", "APPROACH: x"), ("Planner", plan), ("Coder", coder_with_revision),
-                   ("Reviewer", "- index.html: the cart counter requested by the user is missing")]
+        plan = nl.join(["SUMMARY: s.", "FILES:", "- cart.js: total", "NOTES:", "- x", ""])
+        eng = self.make(d, [("Researcher", "APPROACH: x"), ("Planner", plan), ("Coder", coder_js),
+                            ("Reviewer", review_reply)], [])
+        return eng, eng.handle_code("write a cart total function in javascript")
+
+    def test_proven_review_finding_is_fixed(self):
         with tempfile.TemporaryDirectory() as d:
-            eng = self.make(d, replies, [])
-            out = eng.handle_code("create a shoe page with a cart counter")
-            with open(os.path.join(d, "index.html")) as f:
-                self.assertIn("cart-count", f.read())
-            self.assertIn("1 of 1 review finding", out)
-            self.assertIn("qwen2.5:7b", {m for _, m in eng.client.calls})   # researcher model used
+            eng, out = self._review_run(d, "- cart.js: `let sum = price - qty;` - must multiply, not subtract")
+            self.assertIn("price * qty", fsops.read_file(d, "cart.js"))
+            self.assertIn("1 of 1 finding(s) fixed", out)
+
+    def test_unproven_review_finding_is_ignored(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, out = self._review_run(d, "- cart.js: the checkout section is not completed")
+            self.assertIn("price - qty", fsops.read_file(d, "cart.js"))       # no wasted rewrite
+            self.assertIn("1 unproven finding(s) ignored", out)
+            self.assertNotIn("REVIEW FINDINGS", " ".join(k for k, _ in eng.client.calls))
 
     def test_code_mode_rejects_offtopic_and_chat_mode_allows_it(self):
         replies = [("classify", "OFFTOPIC"), ("DevForge AI, a friendly", "Paris.")]
@@ -177,7 +187,7 @@ class PipelineTests(unittest.TestCase):
             eng = self.make(d, replies, [])
             out = eng.handle_code("who is the president of france?")
             self.assertIn("Code mode", out)
-            self.assertEqual(eng.client.calls[-1][1], "qwen2.5-coder:1.5b")     # only the tiny router ran
+            self.assertEqual([k for k, _ in eng.client.calls if k != "title"], ["classify"])   # only the router ran
             self.assertEqual(eng.handle_chat("capital of france?"), "Paris.")
 
     def test_ask_uses_rag(self):
@@ -348,7 +358,7 @@ class SinglePageTests(unittest.TestCase):
             eng = Engine(d, FakeClient(replies))
             eng.handle_code("generate a simple website for a shoes store")
             self.assertEqual(sorted(f for f in os.listdir(d) if not f.startswith(".")),
-                             ["index.html", "script.js", "styles.css", "theme.css"])
+                             ["index.html", "script.js", "site.js", "styles.css", "theme-toggle.js", "theme.css"])
 
     def test_multi_page_request_is_respected(self):
         plan = "SUMMARY: s.\nFILES:\n- index.html: home\n- about.html: about\n- styles.css: css\nNOTES:\n- x\n"
@@ -837,3 +847,64 @@ class TestReplyTimer(unittest.TestCase):
                 {"role": "assistant", "content": "old message without a prompt", "ts": 930.0},
                 {"role": "user", "content": "no ts"}, {"role": "assistant", "content": "x", "ts": 5.0}]
         self.assertEqual(reply_durations(msgs), [None, 3.5, None, 720.0, None, None, None])
+
+
+class SiteKitTests(unittest.TestCase):
+    """The parts that small models kept getting wrong are now done by code."""
+
+    def test_fixed_colours_become_theme_colours(self):
+        from devforge import themes
+        css = ("#schedule .card { background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,.1); }\n"
+               ".card-foot { background-color: #007bff; color: white; }\n"
+               ".hero { background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%); color: white; }\n"
+               "input { border: 1px solid #ccc; }\n"
+               "#form-msg.success { color: green; }\n#form-msg.error { color: red; }\n")
+        out, n = themes.theme_colours(css)
+        self.assertIn("background-color: var(--surface)", out)          # white card follows the theme
+        self.assertIn("rgba(0,0,0,.1)", out)                             # shadows are left alone
+        self.assertIn("background-color: var(--primary)", out)
+        self.assertIn("var(--primary-contrast)", out)                    # white text on the accent stays readable
+        self.assertIn("var(--hero-bg)", out)
+        self.assertIn("var(--hero-text)", out)
+        self.assertIn("var(--border-strong)", out)
+        self.assertIn("var(--success)", out)
+        self.assertIn("var(--danger)", out)
+        self.assertEqual(themes.theme_colours(out)[1], 0)              # idempotent
+
+    def test_menu_class_without_css_rule_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "index.html", '<nav class="nav-links"></nav><button id="menu-btn">x</button>'
+                                              '<script src="script.js"></script>')
+            fsops.write_file(d, "styles.css", ".nav-links a.active { color: blue; }")
+            fsops.write_file(d, "script.js", "const navLinks = document.querySelector('.nav-links');\n"
+                                             "document.getElementById('menu-btn').onclick = () => navLinks.classList.toggle('active');\n"
+                                             "document.getElementById('cart-count').textContent = 1;\n")
+            probs = fsops.consistency_check(d, ["index.html", "script.js"])
+            self.assertEqual(len(probs), 1)
+            self.assertIn('.nav-links.active', probs[0]["error"])        # the exact menu bug
+            self.assertIn('id "cart-count"', probs[0]["error"])          # an id the page does not have
+            fsops.write_file(d, "styles.css", ".nav-links.active { display: flex; }")
+            fsops.write_file(d, "index.html", '<nav class="nav-links"></nav><button id="menu-btn">x</button>'
+                                              '<span id="cart-count">0</span>')
+            self.assertEqual(fsops.consistency_check(d, ["index.html", "script.js"]), [])
+
+    def test_existing_site_is_repaired_by_code(self):
+        from devforge import themes
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "theme.css", themes.render_css("clean-light"))
+            fsops.write_file(d, "index.html", '<html><head><link rel="stylesheet" href="theme.css">'
+                                              '<link rel="stylesheet" href="styles.css"></head><body>'
+                                              '<header class="navbar"><div class="nav-inner"><nav class="nav-links">'
+                                              '<a href="#about">About</a></nav></div></header>'
+                                              '<section id="about" class="section"><div class="card">x</div></section>'
+                                              '</body></html>')
+            fsops.write_file(d, "styles.css", ".card { background-color: #fff; color: #333; }")
+            client = FakeClient([])
+            out = Engine(d, client).handle_code("use the theme colours in styles.css")
+            self.assertIn("var(--surface)", fsops.read_file(d, "styles.css"))
+            page = fsops.read_file(d, "index.html")
+            self.assertIn("site.js", page)
+            self.assertIn("theme-toggle.js", page)
+            self.assertIn(".nav-links.open", fsops.read_file(d, "theme.css", 40000))   # mobile menu styles
+            self.assertEqual({k for k, _ in client.calls} - {"title", "memory"}, set())  # no model needed
+            self.assertNotIn("❌", out)

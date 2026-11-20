@@ -187,18 +187,38 @@ th{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.0
 .footer a,footer a{color:inherit;text-decoration:underline}
 
 @media (max-width:640px){.nav-inner{justify-content:center}.hero{text-align:center}.btn-row{justify-content:center}.hero .lead{margin-inline:auto}}
+
+/* mobile menu: the button is shown on small screens; site.js opens the links panel */
+.menu-btn,.nav-toggle,.hamburger{display:none;background:transparent;color:var(--text);border:1px solid var(--border-strong);box-shadow:none;padding:.45rem .75rem;font-size:1.2rem;line-height:1;border-radius:var(--radius-sm)}
+.menu-btn:hover,.nav-toggle:hover,.hamburger:hover{transform:none;filter:none;background:var(--bg-alt)}
+section[id],[id].section,footer[id]{scroll-margin-top:76px}
+.success,.msg-success,.text-success{color:var(--success)}
+.error,.msg-error,.text-error,.danger{color:var(--danger)}
+@media (max-width:760px){
+.nav-inner{flex-wrap:nowrap;justify-content:space-between}
+.menu-btn,.nav-toggle,.hamburger{display:inline-flex}
+.nav-links{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;align-items:stretch;gap:0;padding:.5rem 4% 1rem;background:var(--surface);border-bottom:1px solid var(--border);box-shadow:var(--shadow)}
+.nav-links.open{display:flex}
+.nav-links a{padding:.75rem .5rem;border-radius:var(--radius-sm)}
+.nav-links a:hover,.nav-links a.active{background:var(--bg-alt)}
+}
 """
 
 # What the Coder is told about the stylesheet (kept short for small models).
 DESIGN_SYSTEM = """A ready-made modern stylesheet `theme.css` (theme: {theme}) is already in the project. Link it in every
 HTML page with <link rel="stylesheet" href="theme.css"> BEFORE any other stylesheet, and build the page from its classes:
-- Page: <header class="navbar"><div class="container nav-inner"><a class="brand" href="index.html">Name</a><nav class="nav-links"><a href="index.html" class="active">Home</a><a href="#products">Products</a></nav></div></header>
+- Page: <header class="navbar"><div class="container nav-inner"><a class="brand" href="#home">Name</a><nav class="nav-links"><a href="#home" class="active">Home</a><a href="#products">Products</a></nav><button class="menu-btn" id="menu-btn" type="button">&#9776;</button></div></header>
 - Hero: <section class="hero"><div class="container"><h1>Headline</h1><p class="lead">Subtitle</p><div class="btn-row"><a class="btn" href="#products">Shop now</a><a class="btn btn-outline" href="#about">Learn more</a></div></div></section>
 - Section: <section class="section" id="products"><div class="container"><h2 class="section-title">Title</h2><div class="grid"> ...cards... </div></div></section> (add class "alt" for a tinted band)
 - Card: <article class="card"><div class="card-img">👟</div><div class="card-body"><span class="badge">New</span><h3>Name</h3><p>Short text</p><div class="card-foot"><span class="price">$99</span><button class="btn btn-sm">Add to cart</button></div></div></article>
 - Also available: .grid-2 (two columns), .stats (<div><strong>10k</strong>label</div>), .cta, .pill (counter bubble), .form-row with label+input, table, .footer.
 - Use an emoji inside .card-img as the picture (no external images). Do NOT restyle body, navbar, cards or buttons yourself;
-  put only small page-specific extras in styles.css (e.g. cart panel, special layouts)."""
+  put only small page-specific extras in styles.css (e.g. cart panel, special layouts).
+- ALREADY DONE BY CODE, do NOT write JavaScript or CSS for these: the mobile hamburger menu, smooth scrolling,
+  highlighting the nav link of the visible section (site.js) and the light/dark theme switch (theme-toggle.js).
+- COLOURS: never write colour values (#hex, rgb(), white, black...) in styles.css. Use only the theme variables:
+  var(--text), var(--muted), var(--surface), var(--bg-alt), var(--primary), var(--primary-contrast), var(--border).
+  For form messages use class "success" (green) or "error" (red)."""
 
 
 def describe() -> str:
@@ -235,6 +255,12 @@ def _luminance(hex_color: str) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+def _status_vars(v: Dict[str, str], dark: bool) -> None:
+    """Readable green/red for form messages in both light and dark palettes."""
+    v.setdefault("success", "#4ade80" if dark else "#15803d")
+    v.setdefault("danger", "#f87171" if dark else "#dc2626")
+
+
 def render_css(theme: str, accent: Optional[str] = None) -> str:
     t = THEMES.get(theme) or THEMES[DEFAULT_THEME]
     v = dict(t["vars"])
@@ -242,6 +268,7 @@ def render_css(theme: str, accent: Optional[str] = None) -> str:
         v["primary"] = accent
         v["primary-contrast"] = "#111111" if _luminance(accent) > 0.6 else "#ffffff"
         v["shadow-lg"] = f"0 24px 50px -18px {accent}88"
+    _status_vars(v, is_dark(theme))
     root = ":root{" + ";".join(f"--{k}:{val}" for k, val in v.items()) + "}"
     return f"/* DevForge theme: {theme if theme in THEMES else DEFAULT_THEME} */\n{root}\n{BASE_CSS}\n{t['extra']}"
 
@@ -314,6 +341,8 @@ def dual_pair(current: Optional[str]) -> Dict[str, str]:
     """Pick the dark/light palettes for a switch: the site's own theme stays, the other side is added."""
     if current in THEMES and not is_dark(current):
         return {"dark": "modern-dark", "light": current}
+    if current in THEMES:
+        return {"dark": current, "light": "clean-light"}
     return {"dark": "modern-dark", "light": "clean-light"}
 
 
@@ -325,6 +354,7 @@ def render_dual_css(dark: str, light: str, accent: Optional[str] = None, default
             v["primary"] = accent
             v["primary-contrast"] = "#111111" if _luminance(accent) > 0.6 else "#ffffff"
             v["shadow-lg"] = f"0 24px 50px -18px {accent}88"
+        _status_vars(v, is_dark(name))
         return v
 
     def block(sel: str, name: str) -> str:
@@ -364,3 +394,220 @@ def parse_design(raw: str, fallback: str) -> Dict[str, str]:
     if m:
         spec["sections"] = m.group(1).strip()[:200]
     return spec
+
+
+# ---------------------------------------------------------------- site.js (written by code, never by a model)
+SITE_JS = """/* DevForge site helpers (written by DevForge, not by the AI): mobile menu + active nav link. */
+(function () {
+  function init() {
+    var nav = document.querySelector('.nav-links');
+    if (!nav) return;
+    var btn = document.getElementById('menu-btn') || document.querySelector('.menu-btn, .nav-toggle, .hamburger');
+    if (btn) {                                   // replace it to drop any older, broken click handlers
+      var clean = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clean, btn);
+      btn = clean;
+    } else {                                     // no button in the page: add one next to the links
+      btn = document.createElement('button');
+      btn.id = 'menu-btn';
+      nav.parentNode.insertBefore(btn, nav.nextSibling);
+    }
+    btn.type = 'button';
+    btn.classList.add('menu-btn');
+    btn.setAttribute('aria-label', 'Open menu');
+
+    function setOpen(open) {
+      nav.classList.toggle('open', open);
+      nav.classList.remove('active', 'show');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.textContent = open ? '\\u2715' : '\\u2630';
+    }
+    setOpen(false);
+    btn.addEventListener('click', function (e) { e.stopPropagation(); setOpen(!nav.classList.contains('open')); });
+    nav.addEventListener('click', function (e) { if (e.target.closest('a')) setOpen(false); });
+    document.addEventListener('click', function (e) { if (!nav.contains(e.target)) setOpen(false); });
+    window.addEventListener('resize', function () { if (window.innerWidth > 760) setOpen(false); });
+
+    // highlight the nav link of the section on screen
+    var links = Array.prototype.slice.call(nav.querySelectorAll('a[href^="#"]'));
+    var byId = {};
+    links.forEach(function (a) {
+      var id = decodeURIComponent(a.getAttribute('href').slice(1));
+      if (id && document.getElementById(id)) byId[id] = a;
+    });
+    var ids = Object.keys(byId);
+    if (!ids.length) return;
+    function spy() {
+      // the current section is the last one whose top has passed 35% of the screen;
+      // at the very bottom of the page it is always the last one
+      var current = ids[0];
+      var line = window.innerHeight * 0.35;
+      ids.forEach(function (id) {
+        if (document.getElementById(id).getBoundingClientRect().top <= line) current = id;
+      });
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) current = ids[ids.length - 1];
+      links.forEach(function (a) { a.classList.toggle('active', a === byId[current]); });
+    }
+    // registered after the page's own scroll code, so this one always has the last word
+    window.addEventListener('scroll', spy, { passive: true });
+    window.addEventListener('resize', spy);
+    spy();
+  }
+  // run after the page's own scripts, so older menu code cannot fight with this one
+  if (document.readyState === 'complete') init(); else window.addEventListener('load', init);
+})();
+"""
+
+
+def site_js() -> str:
+    return SITE_JS
+
+
+def is_devforge_theme(css_text: str) -> bool:
+    return bool(re.match(r"\s*/\* DevForge theme:", css_text or ""))
+
+
+# ---------------------------------------------------------------- fixed colours -> theme colours
+_NAMED = {
+    "white": "#ffffff", "black": "#000000", "red": "#ff0000", "green": "#008000", "blue": "#0000ff",
+    "gray": "#808080", "grey": "#808080", "lightgray": "#d3d3d3", "lightgrey": "#d3d3d3", "darkgray": "#a9a9a9",
+    "darkgrey": "#a9a9a9", "whitesmoke": "#f5f5f5", "gainsboro": "#dcdcdc", "silver": "#c0c0c0",
+    "orange": "#ffa500", "purple": "#800080", "navy": "#000080", "teal": "#008080", "crimson": "#dc143c",
+    "tomato": "#ff6347", "dodgerblue": "#1e90ff", "royalblue": "#4169e1", "steelblue": "#4682b4",
+    "darkblue": "#00008b", "darkgreen": "#006400", "darkred": "#8b0000", "aliceblue": "#f0f8ff",
+    "ghostwhite": "#f8f8ff", "snow": "#fffafa", "ivory": "#fffff0", "beige": "#f5f5dc", "lavender": "#e6e6fa",
+}
+_COLOR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|\b(?:" + "|".join(_NAMED) + r")\b", re.I)
+_SKIP_PROPS = ("box-shadow", "text-shadow", "filter", "transition", "animation", "mask")
+
+
+def _rgba(tok: str):
+    t = tok.lower()
+    if t in _NAMED:
+        t = _NAMED[t]
+    if t.startswith("#"):
+        h = t[1:]
+        if len(h) in (3, 4):
+            h = "".join(c * 2 for c in h)
+        if len(h) not in (6, 8):
+            return None
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        a = int(h[6:8], 16) / 255 if len(h) == 8 else 1.0
+        return r, g, b, a
+    nums = re.findall(r"[\d.]+%?", t)
+    if len(nums) < 3:
+        return None
+    try:
+        r, g, b = (float(n.rstrip("%")) * (2.55 if n.endswith("%") else 1) for n in nums[:3])
+        a = float(nums[3].rstrip("%")) / (100 if nums[3].endswith("%") else 1) if len(nums) > 3 else 1.0
+    except ValueError:
+        return None
+    return r, g, b, a
+
+
+def _kind(rgba) -> str:
+    """saturated | light | mid | dark  - a colour's role in the design."""
+    r, g, b, _ = rgba
+    hi, lo = max(r, g, b) / 255, min(r, g, b) / 255
+    lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    if hi - lo > 0.28 and 0.12 < lum < 0.9:
+        return "saturated"
+    if lum >= 0.82:
+        return "light"
+    if lum <= 0.3:
+        return "dark"
+    return "mid"
+
+
+def _bg_role(sel: str, val: str, status: str):
+    """(new value, role) for a background declaration with fixed colours, or None to keep it."""
+    cols = [c for c in (_rgba(t) for t in _COLOR.findall(val)) if c and c[3] >= 0.35]
+    if not cols:
+        return None
+    kinds = {_kind(c) for c in cols}
+    if "gradient" in val or "url(" in val:
+        if re.search(r"hero|banner|jumbotron|masthead|cta", sel):
+            return "var(--hero-bg)", "hero"
+        if re.search(r"img|image|avatar|thumb|icon|media|photo|pic", sel):
+            return "var(--img-bg)", "img"
+        if "saturated" in kinds:
+            return "var(--primary)", "primary"
+        return "var(--bg-alt)", "alt"
+    k = _kind(cols[0])
+    if status and k == "saturated":
+        return f"var(--{status})", "primary"
+    if re.search(r"nav|header|top-?bar", sel) and k in ("light", "mid"):
+        return "var(--nav-bg)", "surface"
+    return {"saturated": ("var(--primary)", "primary"), "light": ("var(--surface)", "surface"),
+            "mid": ("var(--bg-alt)", "alt"), "dark": ("var(--footer-bg)", "footer")}[k]
+
+
+def _fg(prop: str, k: str, status: str, bg: str) -> Optional[str]:
+    """New value for a non-background colour, or None to keep it."""
+    if prop == "color":
+        if status:
+            return f"var(--{status})"
+        if bg == "primary":
+            return "var(--primary-contrast)"
+        if bg == "hero":
+            return "var(--hero-muted)" if k == "mid" else "var(--hero-text)"
+        if bg == "footer":
+            return "var(--footer-text)"
+        return {"saturated": "var(--primary)", "mid": "var(--muted)"}.get(k, "var(--text)")
+    if prop.startswith(("border", "outline", "column-rule")):
+        if status:
+            return f"var(--{status})"
+        return "var(--primary)" if k == "saturated" else "var(--border-strong)"
+    if prop in ("fill", "stroke", "caret-color", "accent-color", "text-decoration-color"):
+        return "var(--primary)" if k == "saturated" else "currentColor"
+    return None
+
+
+def theme_colours(css: str):
+    """Replace fixed colours in a page stylesheet with theme.css variables, so the light/dark switch
+    recolours everything (no white cards with white text in dark mode). Deterministic and idempotent.
+    Returns (new_css, number_of_replacements)."""
+    count = 0
+
+    def fix_block(m):
+        nonlocal count
+        selector, body = m.group(1), m.group(2)
+        sel = selector.lower()
+        status = ("success" if re.search(r"success|valid\b|\.ok\b", sel)
+                  else "danger" if re.search(r"error|danger|invalid|fail|warn", sel) else "")
+        decls = body.split(";")
+        bg = ""
+        for i, d in enumerate(decls):             # backgrounds first: the text colour depends on them
+            if ":" not in d:
+                continue
+            prop, val = d.split(":", 1)
+            if not prop.strip().lower().startswith("background") or not _COLOR.search(val):
+                continue
+            hit = _bg_role(sel, val, status)
+            if hit:
+                decls[i] = f"{prop}: {hit[0]}"
+                bg = hit[1]
+                count += 1
+        for i, d in enumerate(decls):
+            if ":" not in d:
+                continue
+            prop, val = d.split(":", 1)
+            p = prop.strip().lower()
+            if p.startswith("background") or p.startswith(_SKIP_PROPS) or p.startswith("--"):
+                continue
+
+            def swap(tm):
+                nonlocal count
+                c = _rgba(tm.group(0))
+                if not c or c[3] < 0.35:
+                    return tm.group(0)
+                new = _fg(p, _kind(c), status, bg)
+                if new is None:
+                    return tm.group(0)
+                count += 1
+                return new
+            decls[i] = prop + ":" + _COLOR.sub(swap, val)
+        return selector + "{" + ";".join(decls) + "}"
+
+    out = re.sub(r"([^{}]+)\{([^{}]*)\}", fix_block, css)
+    return out, count
