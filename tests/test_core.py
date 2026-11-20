@@ -1005,3 +1005,121 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(_wrong_kind("script.js", "document.addEventListener('DOMContentLoaded', () => {});"))
         self.assertFalse(_wrong_kind("script.js", "import { a } from './a.js';\nfunction f() { return a; }"))
         self.assertFalse(_wrong_kind("index.html", "<!DOCTYPE html><html><body><h1>x</h1></body></html>"))
+
+
+class OnlyChangeWhatIsAskedTests(unittest.TestCase):
+    """Updates change only the asked part; old working code is never lost."""
+    NL = chr(10)
+    FENCE = chr(96) * 3
+    OLD_JS = NL.join([
+        "document.addEventListener('DOMContentLoaded', () => {",
+        "    const form = document.getElementById('register-form');",
+        "    function showMessage(text) { document.getElementById('form-msg').textContent = text; }",
+        "    form.addEventListener('submit', (e) => {",
+        "        e.preventDefault();",
+        "        showMessage('Registration successful!');",
+        "        form.reset();",
+        "    });",
+        "});", ""])
+
+    def _site(self, d):
+        fsops.write_file(d, "index.html", '<html><body><form id="register-form"></form><div id="form-msg"></div>'
+                                          '<script src="script.js"></script></body></html>')
+        fsops.write_file(d, "script.js", self.OLD_JS)
+
+    def test_edit_blocks_change_only_the_asked_lines(self):
+        plan = self.NL.join(["SUMMARY: s.", "FILES:", "- script.js: redirect", "NOTES:", "- x", ""])
+        edit = self.NL.join(["<<<<<<< SEARCH", "        form.reset();", "=======", "        form.reset();",
+                             "        window.location.href = 'thank-you.html';", ">>>>>>> REPLACE"])
+        with tempfile.TemporaryDirectory() as d:
+            self._site(d)
+            fsops.write_file(d, "thank-you.html", "<html><body><h1>Thanks</h1></body></html>")
+            eng = Engine(d, FakeClient([("classify", "BUILD"), ("Planner", plan), ("Coder", edit), ("Reviewer", "LGTM")]))
+            out = eng.handle_code("after a successful registration go to thank-you.html")
+            new = fsops.read_file(d, "script.js")
+            self.assertEqual(new, self.OLD_JS.replace("        form.reset();",
+                                                      "        form.reset();" + self.NL +
+                                                      "        window.location.href = 'thank-you.html';"))
+            self.assertNotIn("❌", out)
+
+    def test_rewrite_that_drops_a_function_is_refused(self):
+        plan = self.NL.join(["SUMMARY: s.", "FILES:", "- script.js: redirect", "NOTES:", "- x", ""])
+        lossy = self.FENCE + "js" + self.NL + self.NL.join([      # the redirect is added but showMessage is gone
+            "document.addEventListener('DOMContentLoaded', () => {",
+            "    const form = document.getElementById('register-form');",
+            "    form.addEventListener('submit', (e) => { e.preventDefault(); window.location.href = 'x.html'; });",
+            "});"]) + self.NL + self.FENCE
+        with tempfile.TemporaryDirectory() as d:
+            self._site(d)
+            eng = Engine(d, FakeClient([("classify", "BUILD"), ("Planner", plan), ("Coder", lossy), ("Reviewer", "LGTM")]))
+            out = eng.handle_code("after a successful registration go to x.html")
+            self.assertEqual(fsops.read_file(d, "script.js"), self.OLD_JS)          # untouched
+            self.assertIn("would have removed `showMessage`", out)
+
+    def test_devforge_files_are_never_planned_and_are_restored(self):
+        from devforge import themes
+        plan = self.NL.join(["SUMMARY: s.", "FILES:", "- theme-toggle.js: theme", "- site.js: menu",
+                             "- script.js: logic", "NOTES:", "- x", ""])
+        edit = self.NL.join(["<<<<<<< SEARCH", "        form.reset();", "=======", "        form.reset(); // done",
+                             ">>>>>>> REPLACE"])
+        with tempfile.TemporaryDirectory() as d:
+            self._site(d)
+            fsops.write_file(d, "theme.css", themes.render_dual_css("modern-dark", "clean-light", None, "light"))
+            fsops.write_file(d, "site.js", themes.site_js())
+            fsops.write_file(d, "theme-toggle.js", self.OLD_JS)                    # a model once overwrote it
+            client = FakeClient([("classify", "BUILD"), ("Planner", plan), ("Coder", edit), ("Reviewer", "LGTM")])
+            Engine(d, client).handle_code("mark the form reset in script.js")
+            self.assertIn("DevForge light/dark theme switch", fsops.read_file(d, "theme-toggle.js"))   # restored
+            coder_files = [m for k, m in client.calls if k == "Coder"]
+            self.assertEqual(len(coder_files), 1)                                  # only script.js went to the model
+
+    def test_db_request_plans_a_backend_and_redirect_plans_the_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = Engine(d, FakeClient([]))
+            planned = eng._add_needed_files(
+                "build a registration website, the data should be saved in .db file permanently",
+                [("index.html", "page"), ("styles.css", "css"), ("script.js", "logic")])
+            self.assertEqual([p for p, _ in planned], ["index.html", "styles.css", "app.py", "script.js"])
+            self.assertIn("fetch()", dict(planned)["script.js"])
+            fsops.write_file(d, "index.html", "<html></html>")
+            planned = eng._add_needed_files(
+                "once registration is successful it should redirect to new page of thank you for registration page",
+                [("script.js", "logic")])
+            self.assertIn("thank-you.html", [p for p, _ in planned])
+
+    def test_redirect_to_a_missing_page_and_saving_without_backend_are_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "index.html", '<form id="f"></form>')
+            fsops.write_file(d, "script.js", "fetch('/submit', {method: 'POST'}); window.location.href = '/thank-you';")
+            err = fsops.consistency_check(d, ["index.html", "script.js"])[0]["error"]
+            self.assertIn('"/thank-you" but that page does not exist', err)
+            self.assertIn('"/submit" but the project has no backend', err)
+            fsops.write_file(d, "thank-you.html", "<html></html>")
+            fsops.write_file(d, "script.js", "window.location.href = 'thank-you.html';")
+            self.assertEqual(fsops.consistency_check(d, ["index.html", "script.js"]), [])
+
+    def test_run_starts_the_backend_for_a_site_with_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "index.html", "<html></html>")
+            self.assertEqual(fsops.find_run_target(d), ("browser", "index.html"))
+            fsops.write_file(d, "app.py", "import http.server" + self.NL + "PORT = 8050" + self.NL)
+            self.assertEqual(fsops.find_run_target(d), ("server", "app.py"))
+            self.assertEqual(fsops.server_port(d, "app.py"), 8050)
+
+
+class PatchingTests(unittest.TestCase):
+    def test_apply_edits(self):
+        from devforge import patching
+        nl = chr(10)
+        src = nl.join(["def a():", "    return 1", "", "def b():", "    return 2", ""])
+        new, errs = patching.apply_edits(src, [("    return 2", "    return 3")])
+        self.assertEqual((new.count("return 3"), errs), (1, []))
+        new, errs = patching.apply_edits(src, [("def b():" + nl + "return 2", "def b():" + nl + "return 4")])
+        self.assertIn("    return 4", new)                                     # indentation kept
+        new, errs = patching.apply_edits(src, [("not there", "x")])
+        self.assertEqual(new, src)
+        self.assertIn("not found", errs[0])
+        new, errs = patching.apply_edits(src, [("", "def c():" + nl + "    return 5")])
+        self.assertTrue(new.rstrip().endswith("return 5"))
+        self.assertEqual(patching.lost_names("x.py", src, "def a():\n    return 1\n"), ["b"])
+        self.assertEqual(patching.lost_names("x.py", src, "def a():\n    return 1\n", "remove function b"), [])

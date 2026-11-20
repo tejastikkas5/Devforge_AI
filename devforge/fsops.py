@@ -426,7 +426,11 @@ def run_python(root: str, rel: str, timeout: int = 30) -> Dict:
 
 
 def find_run_target(root: str) -> Optional[Tuple[str, str]]:
-    """What should the Run button do? -> ('browser'|'python'|'node', relative path)"""
+    """What should the Run button do? -> ('server'|'browser'|'python'|'node', relative path)
+    A site with a Python backend is started through the backend ('server'), so its data is really saved."""
+    servers = backend_files(root)
+    if servers and any(os.path.exists(os.path.join(root, n)) for n in ("index.html", "public/index.html", "static/index.html")):
+        return "server", ("app.py" if "app.py" in servers else servers[0])
     for name in ("index.html", "public/index.html", "src/index.html"):
         if os.path.exists(os.path.join(root, name)):
             return "browser", name
@@ -523,9 +527,15 @@ def consistency_check(root: str, rels: List[str]) -> List[Dict]:
             elif sel and not _styled_on(css, sel, name):
                 problems.append(f'it switches on class "{name}" on {sel} but no CSS rule styles "{sel}.{name}" '
                                 f'(or a plain ".{name}"), so nothing visible changes')
+        for target in missing_redirects(root, js, backend_src):           # location.href = a page that is not there
+            problems.append(f'it sends the browser to "{target}" but that page does not exist '
+                            f'(create it, or use the name of an existing .html file)')
         for path in re.findall(r"""fetch\(\s*['"`](/[\w./-]*)""", js):    # frontend -> backend routes
             if "." in path.rsplit("/", 1)[-1]:
                 continue                                          # a static file such as /index.html, not a route
+            if not backend and path.rstrip("/"):
+                problems.append(f'it sends data to "{path}" but the project has no backend, so nothing is saved')
+                continue
             if backend and path.rstrip("/") and path.rstrip("/") not in backend_src:
                 problems.append(f'it calls "{path}" but the backend ({backend_names}) has no route "{path}"')
         problems = list(dict.fromkeys(problems))
@@ -650,3 +660,75 @@ def dead_nav_links(src: str) -> List[str]:
             label = re.sub(r"<[^>]+>", "", m.group(5)).strip()[:30]
             out.append(f'nav link "{label}" points to "{href or "nothing"}"')
     return out
+
+
+# ---------------------------------------------------------------- backend detection
+_SERVER_CODE = re.compile(r"http\.server|BaseHTTPRequestHandler|SimpleHTTPRequestHandler|flask|@app\.route|do_GET|do_POST")
+
+
+def backend_files(root: str) -> List[str]:
+    """Python files in the project root that run a web server (the site's backend)."""
+    out = []
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return out
+    for fn in names:
+        if fn.endswith(".py") and not fn.startswith("test_"):
+            if _SERVER_CODE.search(read_file(root, fn, 400_000) or ""):
+                out.append(fn)
+    return out
+
+
+def server_port(root: str, rel: str) -> int:
+    """The port a backend listens on (PORT = 8000 / ("", 8000)), 8000 when not found."""
+    src = read_file(root, rel, 400_000) or ""
+    m = re.search(r"\bPORT\s*=\s*(\d{2,5})", src) or re.search(r"""\(\s*["'][^"']*["']\s*,\s*(\d{2,5})\s*\)""", src)
+    return int(m.group(1)) if m else 8000
+
+
+_REDIRECT = re.compile(r"""location(?:\.href)?\s*=\s*['"`]([^'"`]+)['"`]|location\.(?:assign|replace)\(\s*['"`]([^'"`]+)""")
+
+
+def missing_redirects(root: str, js: str, backend_src: str = "") -> List[str]:
+    """Pages a script sends the browser to that do not exist (e.g. location.href = '/thank-you' with no
+    thank-you.html and no backend route for it)."""
+    out = []
+    for a, b in _REDIRECT.findall(js):
+        target = (a or b).split("?")[0].split("#")[0]
+        if not target or target.startswith(("http:", "https:", "mailto:", "tel:", "javascript:")):
+            continue
+        rel = target.lstrip("/") or "index.html"
+        candidates = [rel] if "." in rel.rsplit("/", 1)[-1] else [rel + ".html", rel + "/index.html"]
+        if any(os.path.exists(os.path.join(root, c)) for c in candidates):
+            continue
+        if backend_src and target.rstrip("/") and (f"'{target}'" in backend_src or f'"{target}"' in backend_src):
+            continue                                    # a backend route serves it
+        out.append(target)
+    return out
+
+
+def fix_redirect_paths(root: str, rel: str) -> int:
+    """location.href = '/thank-you' -> 'thank-you.html' when that page exists, so the redirect works both
+    through the backend and when the page is opened directly. Returns the number of fixes."""
+    src = read_file(root, rel, 400_000)
+    if src is None:
+        return 0
+    count = 0
+
+    def fix(m):
+        nonlocal count
+        target = m.group(2)
+        if target.startswith(("http:", "https:", "#")) or "." in target.rsplit("/", 1)[-1]:
+            return m.group(0)
+        page = target.strip("/") + ".html"
+        if target.strip("/") and os.path.exists(os.path.join(root, page)):
+            count += 1
+            return m.group(1) + page + m.group(3)
+        return m.group(0)
+
+    new = re.sub(r"""(location(?:\.href)?\s*=\s*['"`])([^'"`?#]+)(['"`])""", fix, src)
+    new = re.sub(r"""(location\.(?:assign|replace)\(\s*['"`])([^'"`?#]+)(['"`])""", fix, new)
+    if count:
+        write_file(root, rel, new)
+    return count

@@ -1126,9 +1126,19 @@ class MainWindow(QMainWindow):
         self.proc.readyReadStandardOutput.connect(
             lambda: self.output.appendPlainText(bytes(self.proc.readAllStandardOutput()).decode("utf-8", "replace").rstrip()))
         self.proc.finished.connect(self._run_finished)
-        exe = sys.executable if kind == "python" else "node"
+        exe = "node" if kind == "node" else sys.executable
+        env = self.proc.processEnvironment()
+        if env.isEmpty():
+            from PySide6.QtCore import QProcessEnvironment
+            env = QProcessEnvironment.systemEnvironment()
+        env.insert("PYTHONUNBUFFERED", "1")                    # show the server's log lines at once
+        self.proc.setProcessEnvironment(env)
         self.proc.start(exe, [rel])
         self.run_btn.setText("■  Stop")
+        if kind == "server":                                    # a site with a backend: open it through the server
+            url = f"http://localhost:{fsops.server_port(self.root, rel)}/"
+            self.output.appendPlainText(f"Starting the backend, then opening {url} (press Stop to end the server).")
+            QTimer.singleShot(1500, lambda: self.proc and self.proc.state() != QProcess.NotRunning and webbrowser.open(url))
 
     def _run_finished(self, code, _status):
         self.output.appendPlainText(f"\n[process exited with code {code}]")
