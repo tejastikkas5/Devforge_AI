@@ -127,7 +127,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual((sessions[0]["mode"], sessions[0]["title"]), ("code", "Test Chat Title"))
             self.assertEqual([m["role"] for m in eng.store.load(sessions[0]["id"])], ["user", "assistant"])
             models_used = {m for k, m in eng.client.calls if k not in ("title", "memory")}
-            self.assertEqual(models_used, {"qwen2.5-coder:7b"})                  # one model: no swaps on a 4 GB GPU
+            self.assertEqual(models_used, {"qwen2.5:7b", "deepseek-coder:6.7b", "qwen2.5-coder:7b"})   # one model per task
             for f in ("theme-toggle.js", "site.js"):                                  # built-in switch + menu, by code
                 self.assertTrue(os.path.exists(os.path.join(d, f)), f)
             with open(os.path.join(d, "theme.css"), encoding="utf-8") as f:
@@ -187,7 +187,7 @@ class PipelineTests(unittest.TestCase):
             eng = self.make(d, replies, [])
             out = eng.handle_code("who is the president of france?")
             self.assertIn("Code mode", out)
-            self.assertEqual([k for k, _ in eng.client.calls if k != "title"], ["classify"])   # only the router ran
+            self.assertEqual(eng.client.calls[0], ("classify", "qwen2.5-coder:1.5b"))   # only the tiny router ran
             self.assertEqual(eng.handle_chat("capital of france?"), "Paris.")
 
     def test_ask_uses_rag(self):

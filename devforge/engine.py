@@ -176,7 +176,7 @@ class Engine:
             if len(request.strip()) >= 12:
                 self.emit("stage", agent="Memory", model="", text="Saving what we learned...")
                 known = "\n".join("- " + n["text"] for n in mem.notes()[-15:]) or "(none yet)"
-                raw = self._llm("debugger", prompts.MEMORY_SYSTEM.replace("{known}", known),
+                raw = self._llm("router", prompts.MEMORY_SYSTEM.replace("{known}", known),
                                 f"USER: {request[:600]}\n\nASSISTANT: {reply[:900]}", temperature=0.0,
                                 num_predict=140, agent="Memory")
                 facts += memlib.parse_facts(raw)
@@ -198,7 +198,7 @@ class Engine:
     def _make_title(self, first_prompt: str) -> str:
         """Short chat name from the small router model; '' on any failure (keeps provisional title)."""
         try:
-            raw = self._llm("debugger", prompts.TITLE_SYSTEM, first_prompt[:600], temperature=0.2,
+            raw = self._llm("router", prompts.TITLE_SYSTEM, first_prompt[:600], temperature=0.2,
                             num_predict=20, agent="Namer")
         except OllamaError:
             return ""
@@ -240,7 +240,7 @@ class Engine:
         if has_verb and has_noun and not re.match(r"^\s*(what|why|how|where|which|explain|does)\b", text, re.I):
             return "BUILD"
         try:
-            raw = self._llm("debugger", prompts.INTENT_SYSTEM, text, temperature=0.0, num_predict=6,
+            raw = self._llm("router", prompts.INTENT_SYSTEM, text, temperature=0.0, num_predict=6,
                             agent="Router").upper()
             for word in ("OFFTOPIC", "BUILD", "ASK"):
                 if word in raw:
@@ -254,7 +254,7 @@ class Engine:
     def handle_code(self, text: str, sid: Optional[str] = None) -> str:
         sid, history = self._open_session("code", text, sid)
         llm_text, skills_block = self._apply_skills(text)
-        self._stage("Router", "debugger", "Understanding your request...")
+        self._stage("Router", "router", "Understanding your request...")
         intent = self.classify_intent(llm_text)
         self._check()
 

@@ -177,7 +177,7 @@ s += [P("5. If the judge asks: \"Where did you implement ...?\"", h2), table([
     ["Question", "Answer: file and name"],
     ["RAG (retrieval)", "devforge/rag.py, class CodeIndex; used in engine.py (index().context())."],
     ["Agents / Supervisor", "engine.py (_build) and prompts.py."],
-    ["Model per agent", "config.py (ROLE_MODELS: one setting per role, all qwen2.5-coder 7B by default) and llm.py (resolve_model)."],
+    ["Different model per agent", "config.py (ROLE_MODELS) and llm.py (resolve_model picks the installed model)."],
     ["Mobile menu, colours that follow the theme", "themes.py (SITE_JS, theme_colours), applied by engine.py (_repair_site)."],
     ["HTML/CSS/JS mismatch check", "fsops.py: consistency_check, used in engine.py (_verify)."],
     ["Reviewer that cannot invent bugs", "engine.py: _review keeps a finding only if it quotes real code (_proven)."],
@@ -207,9 +207,9 @@ s += [P("6. Report vs. the code (so you are not surprised)", h2), table([
     ["Large models (16B-24B)", "Our laptop uses 1.5B-7B models; bigger ones can be set in config.py"],
     ["Tree-sitter planned for C and JavaScript", "Full AST for Python only; other files use line windows"],
 ], (85*mm, 85*mm)), Spacer(1, 6),
-    P("Models in use: every agent keeps its own role and model setting in config.py, and by default all of them use "
-      "qwen2.5-coder 7B, plus nomic-embed-text for RAG vectors. On our 4 GB GPU, switching between several 4-5 GB models "
-      "reloaded one from disk each time, and the 1.5B-2B models were too weak to debug code or write tests.")]
+    P("Models in use (one per task): qwen2.5-coder 1.5B (Router, chat titles, memory), qwen2.5 7B (Researcher, Designer), "
+      "deepseek-coder 6.7B (Planner), qwen2.5-coder 7B (Coder, Reviewer, Tester, Debugger), nomic-embed-text (RAG vectors). "
+      "Tester and Debugger moved up from codegemma 2B / qwen2.5-coder 1.5B, which often could not write tests or repair real errors.")]
 
 
 def footer(c, d):

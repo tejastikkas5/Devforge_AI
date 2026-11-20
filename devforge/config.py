@@ -3,20 +3,17 @@ import os
 
 OLLAMA_URL = os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")
 
-# One model per role (all installed locally through Ollama). Every role can use a different model,
-# but on a 4 GB GPU each switch between two 4-5 GB models reloads one from disk. So all roles share the
-# strongest local coder: no swaps (faster), and the Debugger / Tester no longer run on 1.5B-2B models
-# that were too weak to fix code or write tests. Change any line to use another installed model.
-CODER_MODEL = "qwen2.5-coder:7b"
+# One model per role (all installed locally through Ollama): each agent uses the model that suits its task.
 ROLE_MODELS = {
-    "planner": CODER_MODEL,             # breaks a request into a file plan
-    "coder": CODER_MODEL,               # writes every file, answers project questions
-    "tester": CODER_MODEL,              # writes unit tests
-    "debugger": CODER_MODEL,            # fixes failing code; also routes prompts, names chats, saves memory
-    "chat": CODER_MODEL,                # free-form Chat tab
-    "researcher": CODER_MODEL,          # writes a short design brief for new websites
-    "reviewer": CODER_MODEL,            # reviews the finished logic for proven bugs only
-    "designer": CODER_MODEL,            # picks the UI theme/accent for websites
+    "router": "qwen2.5-coder:1.5b",     # tiny + fast: routes prompts (build / ask / off-topic), names chats, saves memory
+    "researcher": "qwen2.5:7b",         # general writing model: short design brief for new websites
+    "designer": "qwen2.5:7b",           # picks the UI theme/accent for websites (shares the Researcher's model)
+    "planner": "deepseek-coder:6.7b",   # breaks a request into a file plan
+    "coder": "qwen2.5-coder:7b",        # writes every file, answers project questions
+    "reviewer": "qwen2.5-coder:7b",     # reviews the finished logic for proven bugs only
+    "tester": "qwen2.5-coder:7b",       # writes unit tests (codegemma:2b often returned no usable test file)
+    "debugger": "qwen2.5-coder:7b",     # fixes failing code (the 1.5B model was too weak to repair real errors)
+    "chat": "qwen2.5-coder:7b",         # free-form Chat tab
 }
 
 ENABLE_DESIGNER = True              # set False to skip the Designer step
@@ -29,7 +26,7 @@ MAX_REVIEW_ISSUES = 2
 EMBED_MODEL_HINT = "embed"          # any installed model whose name contains this
 
 NUM_CTX = 8192                      # context window requested from Ollama
-KEEP_ALIVE = "30m"                  # keep the model loaded between agent hand-offs and prompts
+KEEP_ALIVE = "10m"                  # keep a model in memory between agent hand-offs
 MAX_DEBUG_ROUNDS = 2
 MAX_PLAN_FILES = 5
 OLLAMA_MODELS_DIR = r"E:\OllamaModels"   # used only when starting the daemon ourselves
