@@ -89,16 +89,18 @@ s += folder("3.2  devforge/  (the main app)", "This is the real project. Everyth
     ["prompts.py", "The written instructions for each agent (Planner, Coder, Tester, Debugger, Reviewer...)."],
     ["fsops.py", "File tools. Writes files safely (only inside the project folder), checks HTML/CSS/JS/Python, "
                  "repairs broken links, and runs code with a time limit."],
-    ["themes.py", "Six ready-made website designs and the light/dark switch. The Designer agent just picks one."],
+    ["themes.py", "Six ready-made designs for the <i>websites DevForge builds</i>, and their light/dark switch. The Designer agent just picks one."],
     ["skills.py", "Skills: your own instructions saved per project (skills/*.md), used automatically or by typing /name."],
     ["memory.py", "Project memory. Saves short facts and searches old chats so a new chat remembers earlier ones."],
-    ["store.py", "Saves every chat of a project and remembers recently opened folders."],
+    ["store.py", "Saves every chat of a project (each message with its time), remembers recently opened folders, and saves app settings such as your light/dark choice (in ~/.devforge/)."],
 ])
 
 s += folder("3.3  devforge/ui/", "The user interface (what you see on screen), built with PySide6 (Qt).", [
-    ["__init__.py", "Empty file that marks ui as a package."],
+    ["__init__.py", "Small time helpers: works out how long each reply took (from the saved message times) and formats it, e.g. 1m 15s."],
     ["main_window.py", "The whole window: project and chat list, Chat and Code tabs, file tree, code viewer, Run button, "
+                       "the light/dark theme switch with its two colour sets (Midnight Violet and Soft Lavender), "
                        "Skills and Memory windows. Runs AI jobs in the background so the window never freezes."],
+    ["chat_web.py", "The modern chat area, drawn with HTML/CSS: gradient bubbles, avatars, code cards with a Copy button, \"Working on it\" timeline with a live clock, and a \"Completed in ...\" time under every reply. If it cannot load, the window falls back to a simple built-in chat view."],
 ])
 
 s += [P("<b>Hidden folder made by the app:</b> when you open a project, DevForge creates a <b>.devforge/</b> folder inside it with "
@@ -144,7 +146,7 @@ s += folder("3.7  samples/", "Real output from our test runs. Good to show in th
 ])
 
 s += folder("3.8  tests/", "Automated checks that prove the app works.", [
-    ["test_core.py", "49 tests: reading files from AI replies, RAG search, routing, memory, skills, safe file writing, and the full "
+    ["test_core.py", "51 tests: reading files from AI replies, RAG search, routing, memory, skills, safe file writing, the reply timer, and the full "
                      "agent pipeline with a fake AI. Run: <b>python -m unittest tests.test_core</b> (all pass)."],
 ])
 
@@ -178,7 +180,10 @@ s += [P("5. If the judge asks: \"Where did you implement ...?\"", h2), table([
     ["Running / checking code", "fsops.py: static_check, run_python, run_command."],
     ["Safety (stay inside the folder)", "fsops.py: safe_join blocks ../ and drive letters."],
     ["Intent routing", "engine.py: classify_intent and _classify_build."],
-    ["Themes, light/dark", "themes.py and engine.py (_design, _toggle_theme)."],
+    ["Website themes (for built sites)", "themes.py and engine.py (_design, _toggle_theme)."],
+    ["App light/dark switch", "ui/main_window.py: PALETTES, ToggleSwitch, set_theme; choice saved by store.py (save_setting)."],
+    ["Modern chat bubbles, code cards", "ui/chat_web.py: WebChatView (HTML/CSS through Qt WebEngine)."],
+    ["Reply timer (Completed in ...)", "ui/__init__.py (reply_durations, fmt_duration), shown by ui/chat_web.py."],
     ["Memory across chats", "memory.py; used by engine.py (_apply_memory, _remember)."],
     ["Skills", "skills.py; applied in engine.py (_apply_skills)."],
     ["Chat history", "store.py (files in .devforge/chats/)."],
@@ -193,7 +198,7 @@ s += [P("6. Report vs. the code (so you are not surprised)", h2), table([
     ["4 agents: Planner, Coder, Tester, Debugger", "7 agents: Researcher, Designer, Planner, Coder, Reviewer, Tester, Debugger, plus a Router"],
     ["Debugger repairs up to 3 times", "Up to 2 repair rounds (MAX_DEBUG_ROUNDS in config.py)"],
     ["EventBus connects back end and UI", "Engine sends progress through a callback; the Worker turns it into Qt signals"],
-    ["Six-panel window", "Simpler window: sidebar, Chat and Code tabs, file tree, code viewer, output"],
+    ["Six-panel window", "Simpler, modern window: sidebar, Chat and Code tabs, file tree, code viewer, output; light/dark themes and a reply timer"],
     ["Large models (16B-24B)", "Our laptop uses 1.5B-7B models; bigger ones can be set in config.py"],
     ["Tree-sitter planned for C and JavaScript", "Full AST for Python only; other files use line windows"],
 ], (85*mm, 85*mm)), Spacer(1, 6),
