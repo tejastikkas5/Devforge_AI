@@ -176,3 +176,26 @@ def remove_recent(path: str) -> List[str]:
     items = [p for p in load_recent() if os.path.normcase(p) != os.path.normcase(path)]
     _atomic_write(_recent_file(), items)
     return items
+
+
+# ---------------------------------------------------------------- app settings (e.g. light/dark theme)
+def _settings_file() -> str:
+    return os.path.join(os.path.expanduser("~"), ".devforge", "settings.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(_settings_file(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_setting(key: str, value) -> None:
+    data = load_settings()
+    data[key] = value
+    try:
+        _atomic_write(_settings_file(), data)
+    except OSError:
+        pass

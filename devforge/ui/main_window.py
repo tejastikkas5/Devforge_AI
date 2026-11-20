@@ -6,11 +6,12 @@ import threading
 import traceback
 import webbrowser
 from pathlib import Path
+from string import Template
 from typing import Dict, List, Optional
 
 import markdown
 from PySide6.QtCore import QDir, QProcess, QSize, QSortFilterProxyModel, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFont, QKeyEvent
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QKeyEvent, QPainter
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QFileSystemModel, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
                                QTextBrowser, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
@@ -21,62 +22,133 @@ from devforge.engine import Cancelled, Engine
 from devforge.llm import OllamaClient, OllamaError
 from devforge.memory import MAX_NOTES, MemoryStore
 from devforge.skills import MAX_INJECT_CHARS, SkillError, SkillStore
-from devforge.store import ProjectStore, add_recent, load_recent, remove_recent
+from devforge.store import ProjectStore, add_recent, load_recent, load_settings, remove_recent, save_setting
 
-STYLE = """
-* { font-family: 'Segoe UI', sans-serif; font-size: 10pt; color: #e6e9ef; }
-QMainWindow, QWidget#root { background: #0f1218; }
-QWidget#sidebar { background: #0b0e13; }
+# ---------------------------------------------------------------- themes (light / dark)
+PALETTES = {
+    "dark": dict(
+        text="#e6e9ef", strong="#ffffff", muted="#8b93a5", faint="#6b7385", item="#c6ccd8",
+        bg="#0f1218", side="#0b0e13", panel="#0b0e13", field="#151a23",
+        sel="#1b2433", hover="#151b26", border="#262e42", scroll="#2a3347",
+        btn="#1a2030", btn_hover="#222a3d", dis_text="#5b6477", dis_bg="#141925",
+        accent="#3b82f6", primary="#2563eb", primary_hover="#3b74f0", on_primary="#ffffff", danger="#b42318",
+        selection="#264a8f", code_text="#d6deeb", inline_code="#9ecbff", link="#6ea8ff",
+        bubble_user="#1e3a8a", bubble_bot="#161c28", bubble_label="#8fb4ff",
+        progress_bg="#121722", progress_text="#9aa4b8",
+        knob="#ffffff", track_off="#3a4358"),
+    "light": dict(
+        text="#1f2430", strong="#0b0f19", muted="#5f6b80", faint="#7a8496", item="#2e3546",
+        bg="#ffffff", side="#f3f5f9", panel="#f7f8fb", field="#ffffff",
+        sel="#dfe8fb", hover="#eaeef6", border="#d3d9e4", scroll="#c3cad8",
+        btn="#eef1f6", btn_hover="#e2e7f0", dis_text="#a0a8b8", dis_bg="#f2f4f8",
+        accent="#2563eb", primary="#2563eb", primary_hover="#1d4fd8", on_primary="#ffffff", danger="#c62828",
+        selection="#bcd3fb", code_text="#1f2430", inline_code="#1d4fd8", link="#1d5fd6",
+        bubble_user="#dbe7ff", bubble_bot="#f2f4f8", bubble_label="#2f5bd3",
+        progress_bg="#f2f4f8", progress_text="#4b5568",
+        knob="#ffffff", track_off="#c3cad8"),
+}
+THEME = {"name": "dark"}        # the active theme; changed by MainWindow.set_theme
+
+
+def pal() -> Dict[str, str]:
+    return PALETTES[THEME["name"]]
+
+
+STYLE_TMPL = Template("""
+* { font-family: 'Segoe UI', sans-serif; font-size: 10pt; color: $text; }
+QMainWindow, QWidget#root { background: $bg; }
+QWidget#sidebar { background: $side; }
 QLabel#brand { font-size: 14pt; font-weight: 600; padding: 4px 2px; }
-QLabel#muted { color: #8b93a5; }
+QLabel#muted { color: $muted; }
 QTreeWidget { background: transparent; border: none; outline: none; }
-QTreeWidget::item { padding: 5px 4px; border-radius: 6px; color: #c6ccd8; }
-QTreeWidget::item:selected { background: #1b2433; color: white; }
-QTreeWidget::item:hover { background: #151b26; }
+QTreeWidget::item { padding: 5px 4px; border-radius: 6px; color: $item; }
+QTreeWidget::item:selected { background: $sel; color: $strong; }
+QTreeWidget::item:hover { background: $hover; }
 QListWidget { background: transparent; border: none; outline: none; }
-QListWidget::item { padding: 8px 10px; border-radius: 6px; color: #c6ccd8; }
-QListWidget::item:selected { background: #1b2433; color: white; }
-QListWidget::item:hover { background: #151b26; }
-QPushButton { background: #1a2030; border: 1px solid #262e42; border-radius: 6px; padding: 7px 14px; }
-QPushButton:hover { background: #222a3d; }
-QPushButton:disabled { color: #5b6477; background: #141925; }
-QPushButton#primary { background: #2563eb; border: none; font-weight: 600; }
-QPushButton#primary:hover { background: #3b74f0; }
-QPushButton#danger { background: #b42318; border: none; font-weight: 600; }
+QListWidget::item { padding: 8px 10px; border-radius: 6px; color: $item; }
+QListWidget::item:selected { background: $sel; color: $strong; }
+QListWidget::item:hover { background: $hover; }
+QPushButton { background: $btn; border: 1px solid $border; border-radius: 6px; padding: 7px 14px; }
+QPushButton:hover { background: $btn_hover; }
+QPushButton:disabled { color: $dis_text; background: $dis_bg; }
+QPushButton#primary { background: $primary; border: none; font-weight: 600; color: $on_primary; }
+QPushButton#primary:hover { background: $primary_hover; }
+QPushButton#danger { background: $danger; border: none; font-weight: 600; color: #ffffff; }
 QPushButton#tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0;
-                  padding: 8px 16px; color: #8b93a5; font-weight: 600; }
-QPushButton#tab:checked { color: white; border-bottom: 2px solid #3b82f6; }
-QPushButton#tab:hover:!checked { color: #c6ccd8; }
-QTextBrowser, QPlainTextEdit { background: #0f1218; border: none; selection-background-color: #264a8f; }
-QDialog { background: #0f1218; }
-QLineEdit { background: #151a23; border: 1px solid #262e42; border-radius: 8px; padding: 7px 10px; }
-QLineEdit:focus { border: 1px solid #3b82f6; }
-QPlainTextEdit#skilltext { background: #151a23; border: 1px solid #262e42; border-radius: 8px; padding: 8px; }
-QPlainTextEdit#skilltext:focus { border: 1px solid #3b82f6; }
-QPlainTextEdit#input { background: #151a23; border: 1px solid #262e42; border-radius: 10px; padding: 8px; }
-QPlainTextEdit#input:focus { border: 1px solid #3b82f6; }
-QPlainTextEdit#code, QPlainTextEdit#output { background: #0b0e13; font-family: Consolas, 'Cascadia Mono', monospace; }
-QTreeView { background: #0b0e13; border: none; outline: none; }
+                  padding: 8px 16px; color: $muted; font-weight: 600; }
+QPushButton#tab:checked { color: $strong; border-bottom: 2px solid $accent; }
+QPushButton#tab:hover:!checked { color: $item; }
+QTextBrowser, QPlainTextEdit { background: $bg; border: none; selection-background-color: $selection; }
+QDialog { background: $bg; }
+QMenu { background: $field; border: 1px solid $border; }
+QMenu::item:selected { background: $sel; }
+QToolTip { background: $field; color: $text; border: 1px solid $border; }
+QLineEdit { background: $field; border: 1px solid $border; border-radius: 8px; padding: 7px 10px; }
+QLineEdit:focus { border: 1px solid $accent; }
+QPlainTextEdit#skilltext { background: $field; border: 1px solid $border; border-radius: 8px; padding: 8px; }
+QPlainTextEdit#skilltext:focus { border: 1px solid $accent; }
+QPlainTextEdit#input { background: $field; border: 1px solid $border; border-radius: 10px; padding: 8px; }
+QPlainTextEdit#input:focus { border: 1px solid $accent; }
+QPlainTextEdit#code, QPlainTextEdit#output { background: $panel; font-family: Consolas, 'Cascadia Mono', monospace; }
+QTreeView { background: $panel; border: none; outline: none; }
 QTreeView::item { padding: 3px; }
-QTreeView::item:selected { background: #1b2433; }
-QSplitter::handle { background: #1a2030; }
+QTreeView::item:selected { background: $sel; color: $strong; }
+QTreeWidget { background: transparent; }
+QSplitter::handle { background: $border; }
 QSplitter::handle:horizontal { width: 2px; }
 QSplitter::handle:vertical { height: 2px; }
 QScrollBar:vertical { background: transparent; width: 10px; }
-QScrollBar::handle:vertical { background: #2a3347; border-radius: 5px; min-height: 30px; }
+QScrollBar::handle:vertical { background: $scroll; border-radius: 5px; min-height: 30px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
 QScrollBar:horizontal { background: transparent; height: 10px; }
-QScrollBar::handle:horizontal { background: #2a3347; border-radius: 5px; }
-"""
+QScrollBar::handle:horizontal { background: $scroll; border-radius: 5px; }
+""")
 
-DOC_CSS = """
-body { color: #e6e9ef; font-family: 'Segoe UI'; font-size: 10pt; }
+DOC_CSS_TMPL = Template("""
+body { color: $text; font-family: 'Segoe UI'; font-size: 10pt; }
 p { margin: 4px 0; } li { margin: 2px 0; }
-pre { background-color: #0b0e13; color: #d6deeb; padding: 8px; font-family: Consolas, monospace; font-size: 9.5pt; }
-code { background-color: #0b0e13; color: #9ecbff; font-family: Consolas, monospace; }
-a { color: #6ea8ff; } th, td { padding: 4px 8px; border: 1px solid #2a3347; }
-h1, h2, h3 { color: #ffffff; }
-"""
+pre { background-color: $panel; color: $code_text; padding: 8px; font-family: Consolas, monospace; font-size: 9.5pt; }
+code { background-color: $panel; color: $inline_code; font-family: Consolas, monospace; }
+a { color: $link; } th, td { padding: 4px 8px; border: 1px solid $scroll; }
+h1, h2, h3 { color: $strong; }
+""")
+
+
+def style_sheet() -> str:
+    return STYLE_TMPL.substitute(pal())
+
+
+def doc_css() -> str:
+    return DOC_CSS_TMPL.substitute(pal())
+
+
+class ToggleSwitch(QCheckBox):
+    """A small iOS-style on/off switch (checked = dark mode)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(42, 22)
+
+    def sizeHint(self):
+        return QSize(42, 22)
+
+    def hitButton(self, pos):          # the whole widget is clickable
+        return self.rect().contains(pos)
+
+    def paintEvent(self, _event):
+        p = pal()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        r = self.rect().adjusted(1, 1, -1, -1)
+        painter.setBrush(QColor(p["primary"] if self.isChecked() else p["track_off"]))
+        painter.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+        d = r.height() - 6
+        x = r.right() - d - 3 if self.isChecked() else r.left() + 3
+        painter.setBrush(QColor(p["knob"]))
+        painter.drawEllipse(x, r.top() + 3, d, d)
+        painter.end()
 
 
 def md(text: str) -> str:
@@ -155,7 +227,7 @@ class ChatView(QTextBrowser):
     def __init__(self):
         super().__init__()
         self.setOpenExternalLinks(True)
-        self.document().setDefaultStyleSheet(DOC_CSS)
+        self.document().setDefaultStyleSheet(doc_css())
         self.messages: List[Dict] = []
         self.progress: List[str] = []
         self.live: Optional[str] = None
@@ -169,12 +241,19 @@ class ChatView(QTextBrowser):
     def refresh(self):
         self._dirty = True
 
+    def retheme(self):
+        """Re-apply colours after a light/dark switch and redraw the messages."""
+        self.document().setDefaultStyleSheet(doc_css())
+        self._dirty = True
+        self._flush()
+
     def _bubble(self, who: str, body_html: str, user: bool) -> str:
-        bg, label = ("#1e3a8a", "You") if user else ("#161c28", who)
+        p = pal()
+        bg, label = (p["bubble_user"], "You") if user else (p["bubble_bot"], who)
         align = "right" if user else "left"
         width = "80%" if user else "96%"
         return (f'<table align="{align}" width="{width}" cellspacing="0" cellpadding="10" style="margin-bottom:10px">'
-                f'<tr><td bgcolor="{bg}"><span style="color:#8fb4ff;font-size:8.5pt"><b>{html.escape(label)}</b></span><br>'
+                f'<tr><td bgcolor="{bg}"><span style="color:{p["bubble_label"]};font-size:8.5pt"><b>{html.escape(label)}</b></span><br>'
                 f'{body_html}</td></tr></table><br clear="all">')
 
     def _flush(self):
@@ -186,7 +265,7 @@ class ChatView(QTextBrowser):
         old = bar.value()
         parts = []
         if not self.messages and not self.progress and self.live is None:
-            parts.append(f'<div style="color:#8b93a5;margin-top:60px;text-align:center">{self.placeholder}</div>')
+            parts.append(f'<div style="color:{pal()["muted"]};margin-top:60px;text-align:center">{self.placeholder}</div>')
         for m in self.messages:
             if m["role"] == "user":
                 parts.append(self._bubble("You", html.escape(m["content"]).replace("\n", "<br>"), True))
@@ -196,7 +275,8 @@ class ChatView(QTextBrowser):
             parts.append(self._bubble("DevForge", md(self.live) if self.live else "<i>...</i>", False))
         if self.progress:
             rows = "<br>".join(self.progress)
-            parts.append(f'<table width="96%" cellpadding="8"><tr><td bgcolor="#121722" style="color:#9aa4b8">{rows}</td></tr></table>')
+            parts.append(f'<table width="96%" cellpadding="8"><tr><td bgcolor="{pal()["progress_bg"]}" '
+                         f'style="color:{pal()["progress_text"]}">{rows}</td></tr></table>')
         self.setHtml("".join(parts))
         bar.setValue(bar.maximum() if at_bottom else old)
 
@@ -405,7 +485,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"DevForge AI {__version__}")
         self.resize(1360, 820)
-        self.setStyleSheet(STYLE)
+        THEME["name"] = "light" if load_settings().get("theme") == "light" else "dark"
+        self.setStyleSheet(style_sheet())
         self.root: Optional[str] = None
         self.mode = "code"
         self.engine: Optional[Engine] = None
@@ -455,6 +536,16 @@ class MainWindow(QMainWindow):
         self.status_lbl = QLabel("Checking Ollama...")
         self.status_lbl.setObjectName("muted")
         self.status_lbl.setWordWrap(True)
+        theme_row = QHBoxLayout()
+        theme_row.setContentsMargins(2, 6, 2, 6)
+        self.theme_lbl = QLabel()
+        self.theme_switch = ToggleSwitch()
+        self.theme_switch.setToolTip("Switch between light and dark theme")
+        self.theme_switch.setChecked(THEME["name"] == "dark")
+        self.theme_switch.toggled.connect(lambda on: self.set_theme("dark" if on else "light"))
+        theme_row.addWidget(self.theme_lbl, 1)
+        theme_row.addWidget(self.theme_switch)
+        self._update_theme_label()
         for w in (brand, sub):
             sl.addWidget(w)
         sl.addSpacing(10)
@@ -462,6 +553,7 @@ class MainWindow(QMainWindow):
         sl.addSpacing(12)
         sl.addWidget(recent_lbl)
         sl.addWidget(self.recent, 1)
+        sl.addLayout(theme_row)
         sl.addWidget(self.status_lbl)
         outer.addWidget(side)
 
@@ -571,22 +663,37 @@ class MainWindow(QMainWindow):
         cl.addWidget(self.split, 1)
         outer.addWidget(col, 1)
 
-    # ------------------------------------------------------------ recent folders
+    # ------------------------------------------------------------ light / dark theme
+    def _update_theme_label(self):
+        self.theme_lbl.setText("🌙  Dark mode" if THEME["name"] == "dark" else "☀  Light mode")
+
+    def set_theme(self, name: str):
+        if name not in PALETTES or name == THEME["name"]:
+            return
+        THEME["name"] = name
+        save_setting("theme", name)
+        self.setStyleSheet(style_sheet())
+        self._update_theme_label()
+        self.view.retheme()
+        self.refresh_sidebar()          # folder rows carry their own colours
+        self.theme_switch.update()
+
     # ------------------------------------------------------------ sidebar: projects > chats
     def _folder_row(self, path: str, active: bool) -> QWidget:
+        p = pal()
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(4, 0, 2, 0)
         lbl = QLabel("📁  " + (os.path.basename(path) or path))
         lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         if active:
-            lbl.setStyleSheet("font-weight:600;color:white")
+            lbl.setStyleSheet(f"font-weight:600;color:{p['strong']}")
         btn = QToolButton()
         btn.setText("＋")
         btn.setToolTip("New chat in this folder")
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setStyleSheet("QToolButton{border:none;color:#8b93a5;font-size:13pt;padding:0 6px}"
-                          "QToolButton:hover{color:white}")
+        btn.setStyleSheet(f"QToolButton{{border:none;color:{p['muted']};font-size:13pt;padding:0 6px}}"
+                          f"QToolButton:hover{{color:{p['strong']}}}")
         btn.clicked.connect(lambda _=False, p=path: self.new_chat(p))
         h.addWidget(lbl, 1)
         h.addWidget(btn)
@@ -884,7 +991,7 @@ class MainWindow(QMainWindow):
             self.refresh_sidebar()
         elif kind == "stage":
             self._finish_line(job)
-            model = f" <span style='color:#6b7385'>({d['model']})</span>" if d.get("model") else ""
+            model = f" <span style='color:{pal()['faint']}'>({d['model']})</span>" if d.get("model") else ""
             job.progress.append(f"⏳ <b>{html.escape(d['agent'])}</b>{model} - {html.escape(d['text'])}")
             job.line = len(job.progress) - 1
         elif kind == "stream":
