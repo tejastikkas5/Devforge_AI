@@ -1,0 +1,68 @@
+{
+  "title": "mytest",
+  "messages": [
+    {
+      "timestamp": "2026-11-05T21:51:02.824452",
+      "sender": "USER",
+      "text": "generae a small number counter website for me",
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-11-05T21:51:02.932138",
+      "sender": "Planner",
+      "text": "\n[Error communicating with Ollama: 500 Server Error: Internal Server Error for url: http://127.0.0.1:11434/api/chat]",
+      "metadata": {
+        "model": "qwen2.5-coder:1.5b"
+      }
+    },
+    {
+      "timestamp": "2026-11-05T21:51:02.982994",
+      "sender": "Coder",
+      "text": "\n[Error communicating with Ollama: 500 Server Error: Internal Server Error for url: http://127.0.0.1:11434/api/chat]",
+      "metadata": {
+        "model": "qwen2.5-coder:1.5b",
+        "files": []
+      }
+    },
+    {
+      "timestamp": "2026-11-05T21:51:03.037344",
+      "sender": "Tester",
+      "text": "\n[Error communicating with Ollama: 500 Server Error: Internal Server Error for url: http://127.0.0.1:11434/api/chat]",
+      "metadata": {
+        "model": "qwen2.5-coder:1.5b"
+      }
+    },
+    {
+      "timestamp": "2026-11-05T21:51:03.132233",
+      "sender": "Debugger",
+      "text": "\n[Error communicating with Ollama: 500 Server Error: Internal Server Error for url: http://127.0.0.1:11434/api/chat]",
+      "metadata": {
+        "model": "qwen2.5-coder:1.5b"
+      }
+    },
+    {
+      "timestamp": "2026-11-16T21:44:47.176888",
+      "sender": "USER",
+      "text": "hi",
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-11-16T21:44:47.208284",
+      "sender": "Assistant",
+      "text": "\n[Error communicating with Ollama: 500 Server Error: Internal Server Error for url: http://127.0.0.1:11434/api/chat]",
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-11-16T21:48:05.542082",
+      "sender": "USER",
+      "text": "hi",
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-11-16T21:48:05.560369",
+      "sender": "Assistant",
+      "text": "\n[Error communicating with Ollama: 500 Server Error: Internal Server Error for url: http://127.0.0.1:11434/api/chat]",
+      "metadata": {}
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Welcome to our shoes store. Find the perfect pair of shoes for your style.">
+    <meta name="keywords" content="shoes, store, fashion, footwear, sneakers, boots, heels">
+    <meta name="robots" content="index, follow">
+    <title>Shoes Store</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="#home">Home</a></li>
+                <li><a href="#products">Products</a></li>
+                <li><a href="#about">About Us</a></li>
+                <li><a href="#contact">Contact Us</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main>
+        <section id="home">
+            <h1>Welcome to Our Shoes Store</h1>
+            <p>Find the perfect pair of shoes for your style.</p>
+        </section>
+        <section id="products">
+            <h2>Our Products</h2>
+            <div class="product">
+                <div role="img" aria-label="Shoe 1" style="width:100%;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:2.2rem;color:#fff;border-radius:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6)">Shoe 1</div>
+                <h3>Shoe 1</h3>
+                <p>Description of Shoe 1.</p>
+            </div>
+            <div class="product">
+                <div role="img" aria-label="Shoe 2" style="width:100%;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:2.2rem;color:#fff;border-radius:8px;background:linear-gradient(135deg,#f43f5e,#fb923c)">Shoe 2</div>
+                <h3>Shoe 2</h3>
+                <p>Description of Shoe 2.</p>
+            </div>
+            <div class="product">
+                <div role="img" aria-label="Shoe 3" style="width:100%;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:2.2rem;color:#fff;border-radius:8px;background:linear-gradient(135deg,#10b981,#06b6d4)">Shoe 3</div>
+                <h3>Shoe 3</h3>
+                <p>Description of Shoe 3.</p>
+            </div>
+        </section>
+        <section id="about">
+            <h2>About Us</h2>
+            <p>We are a passionate team of shoe enthusiasts dedicated to bringing you the best shoes from around the world.</p>
+        </section>
+        <section id="contact">
+            <h2>Contact Us</h2>
+            <form id="contact-form">
+                <label for="name">Name:</label>
+                <input type="text" id="name" name="name" required>
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+                <label for="message">Message:</label>
+                <textarea id="message" name="message" required></textarea>
+                <button type="submit">Submit</button>
+            </form>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Shoes Store. All rights reserved.</p>
+    </footer>
+    <script src="script.js"></script>
+</body>
+</html>

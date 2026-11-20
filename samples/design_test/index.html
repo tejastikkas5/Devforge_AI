@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shoe Store</title>
+    <link rel="stylesheet" href="theme.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="navbar">
+        <div class="container nav-inner">
+            <a class="brand" href="index.html">Shoe Store</a>
+            <nav class="nav-links">
+                <a href="index.html" class="active">Home</a>
+                <a href="products.html">Products</a>
+                <a href="about.html">About Us</a>
+                <a href="contact.html">Contact Us</a>
+            </nav>
+        </div>
+    </header>
+
+    <section class="hero">
+        <div class="container">
+            <h1>Welcome to Shoe Store</h1>
+            <p>Find the perfect pair of shoes for every occasion.</p>
+            <div class="btn-row">
+                <a class="btn" href="products.html">Shop Now</a>
+                <a class="btn btn-outline" href="about.html">Learn More</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="products">
+        <div class="container">
+            <h2 class="section-title">Featured Shoes</h2>
+            <div class="grid">
+                <article class="card">
+                    <div class="card-img">👟</div>
+                    <div class="card-body">
+                        <span class="badge">New</span>
+                        <h3>Running Shoes</h3>
+                        <p>Comfortable and durable running shoes.</p>
+                        <div class="card-foot">
+                            <span class="price">$99</span>
+                            <button class="btn btn-sm">Add to Cart</button>
+                        </div>
+                    </div>
+                </article>
+                <article class="card">
+                    <div class="card-img">👠</div>
+                    <div class="card-body">
+                        <h3>Formal Shoes</h3>
+                        <p>Elegant and stylish formal shoes.</p>
+                        <div class="card-foot">
+                            <span class="price">$149</span>
+                            <button class="btn btn-sm">Add to Cart</button>
+                        </div>
+                    </div>
+                </article>
+                <article class="card">
+                    <div class="card-img">👟</div>
+                    <div class="card-body">
+                        <span class="badge">New</span>
+                        <h3>Sneakers</h3>
+                        <p>Fun and trendy sneakers.</p>
+                        <div class="card-foot">
+                            <span class="price">$79</span>
+                            <button class="btn btn-sm">Add to Cart</button>
+                        </div>
+                    </div>
+                </article>
+                <article class="card">
+                    <div class="card-img">👠</div>
+                    <div class="card-body">
+                        <h3>Boots</h3>
+                        <p>Sturdy and practical boots.</p>
+                        <div class="card-foot">
+                            <span class="price">$129</span>
+                            <button class="btn btn-sm">Add to Cart</button>
+                        </div>
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section alt" id="about">
+        <div class="container">
+            <h2 class="section-title">About Us</h2>
+            <p>At Shoe Store, we offer a wide variety of shoes to suit every style and occasion. Our mission is to provide our customers with the best shoes at the best prices.</p>
+        </div>
+    </section>
+
+    <section class="section" id="contact">
+        <div class="container">
+            <h2 class="section-title">Contact Us</h2>
+            <form class="form-row">
+                <label for="name">Name:</label>
+                <input type="text" id="name" name="name" required>
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+                <label for="message">Message:</label>
+                <textarea id="message" name="message" required></textarea>
+                <button class="btn" type="submit">Send</button>
+            </form>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2023 Shoe Store. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

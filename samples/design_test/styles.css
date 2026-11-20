@@ -1,0 +1,73 @@
+/* styles.css */
+
+/* Small page-specific extras */
+
+/* Cart panel */
+.cart-panel {
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    width: 300px;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    display: none;
+}
+
+.cart-panel .cart-header {
+    background: #f1f1f1;
+    padding: 10px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.cart-panel .cart-items {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.cart-panel .cart-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.cart-panel .cart-item .item-name {
+    flex: 1;
+}
+
+.cart-panel .cart-item .item-price {
+    font-weight: bold;
+}
+
+.cart-panel .cart-footer {
+    padding: 10px;
+    text-align: right;
+}
+
+.cart-panel .cart-footer .total {
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.cart-panel .cart-footer .checkout-btn {
+    background: #007bff;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+}
+
+.cart-panel .cart-footer .checkout-btn:hover {
+    background: #0056b3;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .cart-panel {
+        right: 10px;
+        width: 90%;
+    }
+}
