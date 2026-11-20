@@ -818,3 +818,22 @@ class QuestionRoutingTests(unittest.TestCase):
             roles = [m[0]["content"] for m in client.seen]
             self.assertEqual(sum("answer ONLY" in r for r in roles), 1)          # one answering call...
             self.assertFalse(any("Planner of DevForge" in r or "Coder of DevForge" in r for r in roles))   # ...no build pipeline
+
+
+class TestReplyTimer(unittest.TestCase):
+    def test_format(self):
+        from devforge.ui import fmt_duration
+        self.assertEqual(fmt_duration(4.24), "4.2s")
+        self.assertEqual(fmt_duration(42), "42s")
+        self.assertEqual(fmt_duration(75), "1m 15s")
+        self.assertEqual(fmt_duration(3725), "1h 02m")
+
+    def test_durations_from_saved_timestamps(self):
+        from devforge.ui import reply_durations
+        msgs = [{"role": "user", "content": "hi", "ts": 100.0},
+                {"role": "assistant", "content": "hello", "ts": 103.5},
+                {"role": "user", "content": "build a site", "ts": 200.0},
+                {"role": "assistant", "content": "done", "ts": 920.0},
+                {"role": "assistant", "content": "old message without a prompt", "ts": 930.0},
+                {"role": "user", "content": "no ts"}, {"role": "assistant", "content": "x", "ts": 5.0}]
+        self.assertEqual(reply_durations(msgs), [None, 3.5, None, 720.0, None, None, None])

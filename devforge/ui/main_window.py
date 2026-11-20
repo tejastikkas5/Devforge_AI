@@ -3,6 +3,7 @@ import html
 import os
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from pathlib import Path
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QF
                                QWidget)
 
 from devforge import __version__, config, fsops
+from devforge.ui import fmt_duration, reply_durations
 from devforge.engine import Cancelled, Engine
 from devforge.llm import OllamaClient, OllamaError
 from devforge.memory import MAX_NOTES, MemoryStore
@@ -233,6 +235,7 @@ class Job:
         Job._seq += 1
         self.id = Job._seq
         self.root, self.mode, self.text, self.sid = root, mode, text, sid
+        self.started = time.time()          # for the live clock and the 'Completed in' time
         self.progress: List[str] = []
         self.live: Optional[str] = "" if mode == "chat" else None
         self.line = -1
@@ -276,6 +279,7 @@ class ChatView(QTextBrowser):
         self.progress: List[str] = []
         self.live: Optional[str] = None
         self.placeholder = ""
+        self.started: Optional[float] = None
         self._dirty = False
         self._timer = QTimer(self)
         self._timer.setInterval(120)
@@ -315,11 +319,13 @@ class ChatView(QTextBrowser):
         parts = []
         if not self.messages and not self.progress and self.live is None:
             parts.append(f'<div style="color:{pal()["muted"]};margin-top:60px;text-align:center">{self.placeholder}</div>')
-        for m in self.messages:
+        for m, took in zip(self.messages, reply_durations(self.messages)):
             if m["role"] == "user":
                 parts.append(self._bubble("You", html.escape(m["content"]).replace("\n", "<br>"), True))
             else:
-                parts.append(self._bubble("DevForge", md(m["content"]), False))
+                foot = (f'<p align="right" style="color:{pal()["muted"]};font-size:8.5pt">⏱ Completed in '
+                        f'<b>{fmt_duration(took)}</b></p>' if took is not None else "")
+                parts.append(self._bubble("DevForge", md(m["content"]) + foot, False))
         if self.live is not None:
             parts.append(self._bubble("DevForge", md(self.live) if self.live else "<i>...</i>", False))
         if self.progress:
@@ -949,6 +955,7 @@ class MainWindow(QMainWindow):
         job = self.job_for_view()
         self.view.progress = job.progress if job else []      # a running chat shows its live progress again
         self.view.live = job.live if job else None
+        self.view.started = job.started if job else None
         self.view.refresh()
 
     def open_memory(self):
@@ -1024,6 +1031,7 @@ class MainWindow(QMainWindow):
         self.view.messages.append({"role": "user", "content": text})
         self.view.progress = job.progress
         self.view.live = job.live
+        self.view.started = job.started
         self.view.refresh()
         self._sync_controls()
         job.worker.start()
@@ -1054,6 +1062,7 @@ class MainWindow(QMainWindow):
         if self.job_for_view() is job:
             self.view.progress = job.progress
             self.view.live = job.live
+            self.view.started = job.started
             self.view.refresh()
 
     @staticmethod

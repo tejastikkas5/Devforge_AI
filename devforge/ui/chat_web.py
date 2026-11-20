@@ -10,7 +10,10 @@ streaming answers update smoothly without flicker or losing the scroll position.
 """
 import json
 import re
+import time
 from typing import Callable, Dict, List, Optional
+
+from devforge.ui import fmt_duration, reply_durations
 
 import markdown
 from PySide6.QtCore import QTimer, QUrl
@@ -170,6 +173,15 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
 .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 50% { opacity: 1; transform: translateY(-2px); } }
 
+/* time taken / live clock */
+.foot { display: flex; justify-content: flex-end; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.took { font-size: 11.5px; color: var(--muted); background: var(--chip); border: 1px solid var(--chip-border);
+        padding: 3px 10px; border-radius: 999px; }
+.took b { color: var(--accent-text); font-weight: 650; }
+.clock { font: 600 11.5px 'Cascadia Code', Consolas, monospace; color: var(--accent-text); background: var(--chip);
+        border: 1px solid var(--chip-border); padding: 2px 9px; border-radius: 999px; }
+.grow { flex: 1; }
+
 /* empty state */
 .empty { text-align: center; margin: 12vh auto 0; max-width: 460px; color: var(--muted); animation: rise .35s ease-out both; }
 .empty .logo { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 20px; display: grid; place-items: center;
@@ -182,6 +194,18 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
 </style></head>
 <body><div id="feed"></div>
 <script>
+function fmt(s) {
+  if (s < 10) return s.toFixed(1) + 's';
+  s = Math.round(s); if (s < 60) return s + 's';
+  var m = Math.floor(s / 60); s = s % 60;
+  if (m < 60) return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+  var h = Math.floor(m / 60); m = m % 60; return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+}
+setInterval(function () {        // tick every live clock once a second
+  document.querySelectorAll('.clock[data-start]').forEach(function (c) {
+    c.textContent = '⏱ ' + fmt((Date.now() - Number(c.dataset.start)) / 1000);
+  });
+}, 1000);
 function setTheme(css) { document.getElementById('theme').textContent = css; }
 function decorate(root) {
   // code blocks -> window-style card with a Copy button
@@ -267,6 +291,7 @@ class WebChatView(QWebEngineView):
         self.progress: List[str] = []
         self.live: Optional[str] = None
         self.placeholder = ""
+        self.started: Optional[float] = None     # when the running prompt was sent (for the live clock)
         self._ready = False
         self._dirty = True
         self._last = None
@@ -302,28 +327,36 @@ class WebChatView(QWebEngineView):
         css = _theme_css(self._pal(), self._is_dark())
         self.page().runJavaScript(f"setTheme({json.dumps(css)})")
 
+    def _clock(self) -> str:
+        """A live 'elapsed' counter; the page's JavaScript ticks it every second."""
+        if not self.started:
+            return ""
+        return f'<span class="clock" data-start="{self.started * 1000:.0f}">⏱ {fmt_duration(time.time() - self.started)}</span>'
+
     @staticmethod
-    def _row(html_body: str, user: bool, live: bool = False) -> str:
+    def _row(html_body: str, user: bool, live: str = "", took: Optional[float] = None) -> str:
         if user:
             return ('<div class="row user"><div class="avatar me">◉</div><div class="msg">'
                     f'<div class="name">You</div><div class="bubble">{html_body}</div></div></div>')
+        foot = (f'<div class="foot"><span class="took">⏱ Completed in <b>{fmt_duration(took)}</b></span></div>'
+                if took is not None else "")
         return ('<div class="row bot"><div class="avatar bot">⚒</div><div class="msg">'
-                f'<div class="name">DevForge{" · typing" if live else ""}</div>'
-                f'<div class="bubble">{html_body}</div></div></div>')
+                f'<div class="name">DevForge{" · typing " + live if live else ""}</div>'
+                f'<div class="bubble">{html_body}{foot}</div></div></div>')
 
     def _build(self) -> str:
         import html as _html
         if not self.messages and not self.progress and self.live is None:
             return f'<div class="empty"><div class="logo">⚒</div>{self.placeholder}</div>'
         parts = []
-        for m in self.messages:
+        for m, took in zip(self.messages, reply_durations(self.messages)):
             if m["role"] == "user":
                 parts.append(self._row(_html.escape(m["content"]), True))
             else:
-                parts.append(self._row(md_rich(m["content"]), False))
+                parts.append(self._row(md_rich(m["content"]), False, took=took))
         if self.live is not None:
             body = md_rich(self.live) if self.live else '<span class="typing"><i></i><i></i><i></i></span>'
-            parts.append(self._row(body, False, live=True))
+            parts.append(self._row(body, False, live=self._clock() or " "))
         if self.progress:
             steps = []
             for line in self.progress:
@@ -332,7 +365,8 @@ class WebChatView(QWebEngineView):
                 steps.append(f'<div class="step {"run" if running else "done"}"><span class="ic">'
                              f'{"" if running else "✓"}</span><span>{text}</span></div>')
             busy = any(s.startswith("⏳") for s in self.progress)
-            title = ('<span class="spinner"></span> Working on it…' if busy else '✓ Steps')
+            title = (f'<span class="spinner"></span> Working on it… <span class="grow"></span>{self._clock()}'
+                     if busy else '✓ Steps')
             parts.append('<div class="row bot"><div class="avatar bot">⚒</div><div class="msg">'
                          f'<div class="name">DevForge</div><div class="work"><div class="work-title">{title}</div>'
                          f'{"".join(steps)}</div></div></div>')
