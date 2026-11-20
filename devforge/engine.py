@@ -45,6 +45,28 @@ _TOGGLE_REQ = re.compile(r"\b(toggle|switch(er)?|switching)\b.{0,40}\b(theme|dar
 _KIT_REQ = re.compile(r"\b(theme colou?rs?|dark mode colou?rs?|colou?rs? (in|for) dark mode|hamburger|mobile menu|"
                       r"(menu|side ?bar|navbar|nav) (button )?(is )?(not|doesn'?t|does not|won'?t) (open|opening|work|working|show))\b", re.I)
 _REDESIGN_REQ = re.compile(r"\b(redesign|re-design|restyle|new (theme|look|design)|change (the )?(theme|design|look|colou?rs?|style)|(make|give) it (look )?(more )?(modern|fancy|beautiful|stylish|professional|pretty)|make (the )?(design|ui|site|website|page|look)( look)? (more )?(modern|fancy|beautiful|stylish|professional|pretty|better)|better (design|ui|look)|improve (the )?(design|ui|look)|modernize|(dark|light|glass|elegant|vibrant|fresh) (theme|design|style))\b", re.I)
+_KIND_NAME = {".js": "JAVASCRIPT", ".css": "CSS", ".py": "PYTHON", ".html": "HTML", ".htm": "HTML", ".json": "JSON"}
+
+
+def _wrong_kind(rel: str, code: str) -> bool:
+    """True when a file got another language's content (a full HTML page inside script.js or styles.css,
+    a page without any HTML tag, ...). Small models do this now and then."""
+    ext = os.path.splitext(rel)[1].lower()
+    head = code.lstrip()[:400].lower()
+    is_page = head.startswith(("<!doctype", "<html", "<head", "<body")) or "<html" in head
+    if ext in (".js", ".css", ".py", ".json"):
+        return is_page or (ext != ".py" and head.startswith(("import ", "from ", "def ")) and "function" not in head
+                           and "{" not in head)
+    if ext in (".html", ".htm"):
+        return not re.search(r"<[a-z!]", code[:2000], re.I)
+    return False
+
+
+def _same_code(a: str, b: str) -> bool:
+    """True when two versions of a file differ only in whitespace."""
+    return re.sub(r"\s+", "", a) == re.sub(r"\s+", "", b)
+
+
 _ROUTE_TEXT = {
     "new": "New project - full team: Researcher, Designer, Planner, Coder, Reviewer",
     "redesign": "Redesign - Designer, Planner, Coder, Reviewer (Researcher skipped)",
@@ -334,18 +356,21 @@ class Engine:
             planned = [("index.html", "the whole site on one page: navbar, hero, main sections, contact, footer"),
                        ("styles.css", "small page-specific extras only (theme.css already provides the design)"),
                        ("script.js", "interactivity for this page")]
+        planned = self._add_named_files(request, planned)
         summary = re.search(r"SUMMARY:\s*(.+)", plan)
         steps.append(f"Planner ({self.models()['planner']}): {len(planned)} file(s) planned")
 
         # 2) Coder: one file at a time ---------------------------------------
         written: List[str] = []
+        unchanged: List[str] = []                 # files an update request asked for but the model left as they were
+        cut_off: List[str] = []                   # files kept as they were because the new version was cut off
         contents: Dict[str, str] = {}
         if planned:
             names = [p for p, _ in planned]
             for i, (rel, purpose) in enumerate(planned, 1):
                 self._check()
                 self._stage("Coder", "coder", f"Writing {rel} ({i}/{len(planned)})...")
-                old = fsops.read_file(self.root, rel, 8000)
+                old = fsops.read_file(self.root, rel, 16000)    # the whole file, so an update never loses its end
                 parts = [f"REQUEST:\n{request}", f"PLAN:\n{plan}", f"ALL PLANNED FILES: {', '.join(names)}"]
                 if brief:
                     parts.append(f"DESIGN BRIEF:\n{brief}")
@@ -367,8 +392,38 @@ class Engine:
                 raw = self._llm("coder", prompts.CODER_SYSTEM, "\n\n".join(parts), temperature=0.2,
                                 num_predict=4096, agent=f"Coder · {rel}")
                 code = fsops.extract_single(raw)
+                if code.strip() and _wrong_kind(rel, code):
+                    # e.g. a whole HTML page written into script.js: ask once for the right content
+                    self._stage("Coder", "coder", f"{rel} got the wrong kind of content - asking again...")
+                    parts.append(f"YOUR PREVIOUS ANSWER WAS NOT {_KIND_NAME.get(os.path.splitext(rel)[1].lower(), 'valid')} "
+                                 f"CODE. Write ONLY the content of {rel} - nothing from any other file.")
+                    raw = self._llm("coder", prompts.CODER_SYSTEM, "\n\n".join(parts), temperature=0.2,
+                                    num_predict=4096, agent=f"Coder · {rel}")
+                    code = fsops.extract_single(raw)
+                    if _wrong_kind(rel, code):
+                        steps.append(f"Coder: {rel} skipped (wrong kind of content twice)")
+                        continue
+                if old and code.strip() and _same_code(code, old):
+                    # an update request that changed nothing: send it back once with a clear instruction
+                    self._stage("Coder", "coder", f"No change in {rel} - asking again for the requested change...")
+                    parts.append(f"YOUR PREVIOUS ANSWER WAS IDENTICAL TO THE CURRENT FILE. The request needs a real, "
+                                 f"visible change in {rel}: {request[:400]}\nApply it now and return the whole file.")
+                    raw = self._llm("coder", prompts.CODER_SYSTEM, "\n\n".join(parts), temperature=0.35,
+                                    num_predict=4096, agent=f"Coder · {rel}")
+                    retry = fsops.extract_single(raw)
+                    if retry.strip() and not _same_code(retry, old):
+                        code = retry
+                    else:
+                        steps.append(f"Coder: {rel} unchanged")
+                        unchanged.append(rel)
+                        continue
                 if not code.strip():
                     steps.append(f"Coder: no content produced for {rel}")
+                    continue
+                if old and len(old) > 1500 and len(code) < len(old) * 0.5:
+                    # a cut-off answer would silently delete half the file: keep the working version
+                    steps.append(f"Coder: {rel} kept as it was (the new version was cut off)")
+                    cut_off.append(rel)
                     continue
                 fsops.write_file(self.root, rel, code)
                 contents[rel] = code
@@ -389,6 +444,14 @@ class Engine:
                 written.append(rel)
                 self.emit("file", path=rel)
         steps.append(f"Coder ({self.models()['coder']}): wrote {len(written)} file(s)")
+        if not written and cut_off and not unchanged:
+            return ("I kept " + ", ".join(f"`{r}`" for r in cut_off) + " as it was: the new version came back cut off "
+                    "(much shorter than the working file), and saving it would have deleted part of your code. Try a "
+                    "smaller change at a time."), {"files": []}
+        if not written and unchanged:
+            return ("I couldn't make that change: the model returned " + ", ".join(f"`{r}`" for r in unchanged) +
+                    " unchanged, twice. Try describing the exact change, for example *\"in script.js, close the menu "
+                    "when a link is clicked\"*."), {"files": []}
         if not written:
             return ("I couldn't produce any files for that request. Try rephrasing it with a bit more "
                     "detail, for example *\"Create a shoe store website with a product grid and cart\"*."), {"files": []}
@@ -465,12 +528,34 @@ class Engine:
         lines.append("**Checks**\n" + verdict)
         if review_rows:
             lines.append("**Review**\n" + review_rows)
+        if cut_off:
+            lines.append("**Kept as it was:** " + ", ".join(f"`{r}`" for r in cut_off) + " - the new version came back "
+                         "cut off, and saving it would have deleted part of your code.")
+        if unchanged:
+            lines.append("**Not changed:** " + ", ".join(f"`{r}`" for r in unchanged) + " - the model returned the same "
+                         "file twice. Try describing the exact change, e.g. *\"in script.js, add ... when ...\"*.")
         if problems:
             lines.append("Some problems remain (see above). You can ask me to fix them, e.g. *\"fix the error in " + problems[0]["file"] + "\"*.")
         if target:
             lines.append(f"Press **Run** to {'open `' + target[1] + '` in your browser' if target[0] == 'browser' else 'run `' + target[1] + '`'}.")
         lines.append("<sub>" + " → ".join(steps) + "</sub>")
         return "\n\n".join(lines), {"files": written, "tests": test_rel, "ok": not problems}
+
+    _KIT_NAMES = {"theme.css", "theme-toggle.js", "site.js"}
+
+    def _add_named_files(self, request: str, planned: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        """Every file the user names in the request ("update script.js", "a new file app.py") is in the plan,
+        even when the small planner forgot it (e.g. it planned the backend but not the script that calls it)."""
+        have = {p for p, _ in planned}
+        for name in dict.fromkeys(re.findall(r"\b([\w-]+(?:/[\w-]+)*\.(?:html?|css|js|py|json|md|txt|sql))\b", request)):
+            if name in have or name in self._KIT_NAMES or name.startswith("test_"):
+                continue
+            if len(planned) >= config.MAX_PLAN_FILES:
+                break
+            exists = os.path.exists(os.path.join(self.root, name))
+            planned.append((name, ("update it exactly as the request says" if exists else "create it as the request says")))
+            have.add(name)
+        return fsops.order_files(planned)
 
     # ------------------------------------------------------------ site kit (written by code, not by a model)
     def _has_devforge_theme(self) -> bool:
@@ -520,6 +605,14 @@ class Engine:
             if k:
                 fsops.write_file(self.root, r, new)
                 n += k
+        for r in pages:                                  # colours inside the page: <style> blocks, style="..."
+            src = fsops.read_file(self.root, r, 400_000)
+            if not src:
+                continue
+            new, k = themes.theme_colours_html(src)
+            if k:
+                fsops.write_file(self.root, r, new)
+                n += k
         if n:
             out.append(f"turned {n} fixed colour(s) into theme colours")
         return out
@@ -540,6 +633,9 @@ class Engine:
         n = sum(fsops.fix_dangling_refs(self.root, r) for r in html_files)
         if n:
             out.append(f"repaired {n} dangling link(s)")
+        n = sum(fsops.fix_nav_anchors(self.root, r) for r in html_files)
+        if n:
+            out.append(f"pointed {n} dead link(s) at their sections")
         return out
 
     # ------------------------------------------------------------ design
@@ -705,6 +801,14 @@ class Engine:
                 continue
             rows.append(f"- ❌ `{c['file']}` - {c['error'][:300]}")
             problems.append(c)
+        for r in written:                            # nav links that go nowhere (and could not be auto-matched)
+            if r.endswith((".html", ".htm")) and r not in bad:
+                dead = fsops.dead_nav_links(fsops.read_file(self.root, r, 400_000) or "")
+                if dead:
+                    err = ("Dead navigation links: " + "; ".join(dead[:5]) +
+                           ". Every nav link must point to the id of a real section (add the section or fix the href).")
+                    rows.append(f"- ❌ `{r}` - {err[:300]}")
+                    problems.append({"file": r, "error": err})
         if test_rel and not any(p["file"].endswith(".py") for p in problems):
             res = fsops.run_python(self.root, test_rel, 30)
             tail = ((res["stderr"] or res["stdout"]).strip().splitlines() or [""])[-1]

@@ -191,6 +191,9 @@ th{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.0
 /* mobile menu: the button is shown on small screens; site.js opens the links panel */
 .menu-btn,.nav-toggle,.hamburger{display:none;background:transparent;color:var(--text);border:1px solid var(--border-strong);box-shadow:none;padding:.45rem .75rem;font-size:1.2rem;line-height:1;border-radius:var(--radius-sm)}
 .menu-btn:hover,.nav-toggle:hover,.hamburger:hover{transform:none;filter:none;background:var(--bg-alt)}
+.nav-actions{display:flex;align-items:center;gap:.5rem}
+.theme-toggle:not(.theme-toggle-float){background:transparent;color:var(--text);border:1px solid var(--border-strong);box-shadow:none;padding:.45rem .7rem;font-size:1.1rem;line-height:1;border-radius:var(--radius-sm)}
+.theme-toggle:not(.theme-toggle-float):hover{transform:none;filter:none;background:var(--bg-alt)}
 section[id],[id].section,footer[id]{scroll-margin-top:76px}
 .success,.msg-success,.text-success{color:var(--success)}
 .error,.msg-error,.text-error,.danger{color:var(--danger)}
@@ -207,7 +210,8 @@ section[id],[id].section,footer[id]{scroll-margin-top:76px}
 # What the Coder is told about the stylesheet (kept short for small models).
 DESIGN_SYSTEM = """A ready-made modern stylesheet `theme.css` (theme: {theme}) is already in the project. Link it in every
 HTML page with <link rel="stylesheet" href="theme.css"> BEFORE any other stylesheet, and build the page from its classes:
-- Page: <header class="navbar"><div class="container nav-inner"><a class="brand" href="#home">Name</a><nav class="nav-links"><a href="#home" class="active">Home</a><a href="#products">Products</a></nav><button class="menu-btn" id="menu-btn" type="button">&#9776;</button></div></header>
+- Page: <header class="navbar"><div class="container nav-inner"><a class="brand" href="#home">Name</a><nav class="nav-links"><a href="#home" class="active">Home</a><a href="#products">Products</a></nav><div class="nav-actions"><button class="theme-toggle" id="theme-toggle" type="button">&#127769;</button><button class="menu-btn" id="menu-btn" type="button">&#9776;</button></div></div></header>
+  (every nav link must point to the id of a real section on the page; give the first section id="home")
 - Hero: <section class="hero"><div class="container"><h1>Headline</h1><p class="lead">Subtitle</p><div class="btn-row"><a class="btn" href="#products">Shop now</a><a class="btn btn-outline" href="#about">Learn more</a></div></div></section>
 - Section: <section class="section" id="products"><div class="container"><h2 class="section-title">Title</h2><div class="grid"> ...cards... </div></div></section> (add class "alt" for a tinted band)
 - Card: <article class="card"><div class="card-img">👟</div><div class="card-body"><span class="badge">New</span><h3>Name</h3><p>Short text</p><div class="card-foot"><span class="price">$99</span><button class="btn btn-sm">Add to cart</button></div></div></article>
@@ -289,38 +293,43 @@ TOGGLE_JS = """/* DevForge light/dark theme switch. Works with the dark and ligh
   try { saved = localStorage.getItem(KEY); } catch (e) {}
   root.setAttribute('data-theme', saved === 'light' || saved === 'dark' ? saved : '__DEFAULT__');
 
-  function setTheme(t, ours, btn) {
+  function setTheme(t, icon, btn) {
     root.setAttribute('data-theme', t);
+    document.body && document.body.classList.remove('dark', 'dark-mode', 'light', 'light-mode', 'dark-theme', 'light-theme');
     try { localStorage.setItem(KEY, t); } catch (e) {}
-    if (btn) {
-      btn.setAttribute('aria-label', 'Switch to ' + (t === 'dark' ? 'light' : 'dark') + ' theme');
-      if (ours) btn.textContent = t === 'dark' ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19';
-    }
+    if (!btn) return;
+    btn.setAttribute('aria-label', 'Switch to ' + (t === 'dark' ? 'light' : 'dark') + ' theme');
+    if (btn.type === 'checkbox') btn.checked = (t === 'dark');
+    else if (icon) btn.textContent = t === 'dark' ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19';
   }
 
   function init() {
-    var btn = document.getElementById('theme-toggle') ||
-      document.querySelector('.theme-toggle, [data-theme-toggle], button[id*="theme" i], button[class*="theme" i]');
-    var ours = false;
+    var btn = document.getElementById('theme-toggle') || document.querySelector(
+      '.theme-toggle, [data-theme-toggle], button[id*="theme" i], button[class*="theme" i], ' +
+      'input[type="checkbox"][id*="theme" i], input[type="checkbox"][id*="dark" i], input[type="checkbox"][class*="theme" i]');
+    var icon = false;
     if (btn) {
-      var clean = btn.cloneNode(true);          // drop any older, broken click handlers
+      var clean = btn.cloneNode(true);          // drop the page's own (often broken) theme handlers
       btn.parentNode.replaceChild(clean, btn);
       btn = clean;
+      icon = btn.type !== 'checkbox' && btn.textContent.trim().length <= 3;   // an icon-only button shows sun / moon
     } else {
       btn = document.createElement('button');
       btn.id = 'theme-toggle';
       btn.type = 'button';
       btn.className = 'theme-toggle theme-toggle-float';
       document.body.appendChild(btn);
-      ours = true;
+      icon = true;
     }
-    setTheme(root.getAttribute('data-theme'), ours, btn);
-    btn.addEventListener('click', function () {
-      setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark', ours, btn);
+    setTheme(root.getAttribute('data-theme'), icon, btn);
+    btn.addEventListener(btn.type === 'checkbox' ? 'change' : 'click', function () {
+      setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark', icon, btn);
     });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  // the saved theme is applied at once (above, no flash); the button is wired after the page's own
+  // scripts have run, so older theme code cannot fight with this one
+  if (document.readyState === 'complete') init(); else window.addEventListener('load', init);
 })();
 """
 
@@ -611,3 +620,33 @@ def theme_colours(css: str):
 
     out = re.sub(r"([^{}]+)\{([^{}]*)\}", fix_block, css)
     return out, count
+
+
+def theme_colours_html(html: str):
+    """Same as theme_colours, for colours written inside a page: <style> blocks and style="..." attributes.
+    Returns (new_html, number_of_replacements)."""
+    total = 0
+
+    def style_block(m):
+        nonlocal total
+        css, n = theme_colours(m.group(2))
+        total += n
+        return m.group(1) + css + m.group(3)
+
+    def inline(m):
+        nonlocal total
+        tag, quote, body = m.group(1), m.group(3), m.group(4)
+        if not _COLOR.search(body):
+            return m.group(0)
+        cls = re.search(r"""class\s*=\s*["']([^"']+)["']""", m.group(0))
+        sel = tag + ("." + ".".join(cls.group(1).split()) if cls else "")
+        css, n = theme_colours(sel + "{" + body + "}")
+        if not n:
+            return m.group(0)
+        total += n
+        new_body = css[css.index("{") + 1:css.rindex("}")].replace(quote, "'" if quote == '"' else '"')
+        return m.group(0).replace(m.group(2) + quote + body + quote, m.group(2) + quote + new_body + quote, 1)
+
+    out = re.sub(r"(?is)(<style\b[^>]*>)(.*?)(</style>)", style_block, html)
+    out = re.sub(r"""(?is)<(\w+)\b[^>]*?(\bstyle\s*=\s*)(["'])(.*?)\3[^>]*>""", inline, out)
+    return out, total

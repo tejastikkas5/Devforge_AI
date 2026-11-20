@@ -147,8 +147,9 @@ s += folder("3.7  samples/", "Real output from our test runs. Good to show in th
 ])
 
 s += folder("3.8  tests/", "Automated checks that prove the app works.", [
-    ["test_core.py", "55 tests: reading files from AI replies, RAG search, routing, memory, skills, safe file writing, the reply timer, the site kit "
-                     "(colour converter, mismatch check, repairing an existing site), the proof-based Reviewer, and the full "
+    ["test_core.py", "63 tests: reading files from AI replies, RAG search, routing, memory, skills, safe file writing, the reply timer, the site kit "
+                     "(colour converter, mismatch check, repairing an existing site), dead-link repair, backend route check, "
+                     "the no-change retry, the cut-off and wrong-content guards, the proof-based Reviewer, and the full "
                      "agent pipeline with a fake AI. Run: <b>python -m unittest tests.test_core</b> (all pass)."],
 ])
 
@@ -180,6 +181,9 @@ s += [P("5. If the judge asks: \"Where did you implement ...?\"", h2), table([
     ["Different model per agent", "config.py (ROLE_MODELS) and llm.py (resolve_model picks the installed model)."],
     ["Mobile menu, colours that follow the theme", "themes.py (SITE_JS, theme_colours), applied by engine.py (_repair_site)."],
     ["HTML/CSS/JS mismatch check", "fsops.py: consistency_check, used in engine.py (_verify)."],
+    ["Nav links that go to # / nowhere", "fsops.py: fix_nav_anchors (auto-fix) and dead_nav_links (reported to the Debugger)."],
+    ["Frontend fetch() must match backend routes", "fsops.py: consistency_check (reads the Python server routes)."],
+    ["Strict senior-engineer prompts per agent", "prompts.py: role, hard rules, self-check list, exact output format."],
     ["Reviewer that cannot invent bugs", "engine.py: _review keeps a finding only if it quotes real code (_proven)."],
     ["Self-healing fix loop", "engine.py: _verify and _debug, up to 2 rounds."],
     ["Running / checking code", "fsops.py: static_check, run_python, run_command."],

@@ -908,3 +908,100 @@ class SiteKitTests(unittest.TestCase):
             self.assertIn(".nav-links.open", fsops.read_file(d, "theme.css", 40000))   # mobile menu styles
             self.assertEqual({k for k, _ in client.calls} - {"title", "memory"}, set())  # no model needed
             self.assertNotIn("❌", out)
+
+
+class GuardTests(unittest.TestCase):
+    """Code checks that catch what the models still get wrong."""
+
+    def test_dead_nav_links_point_at_their_sections(self):
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "index.html",
+                             '<header class="navbar" id="home"><nav class="nav-links"><a href="#">Home</a>'
+                             '<a href="about.html">About</a><a href="javascript:void(0)">Speakers</a>'
+                             '<a href="#contact">Contact</a></nav></header>'
+                             '<section class="hero" id="hero"><a class="btn" href="#">Register now</a></section>'
+                             '<section id="about"></section><section id="speakers"></section>'
+                             '<section id="register"></section><footer id="footer"></footer>')
+            fsops.fix_dangling_refs(d, "index.html")
+            self.assertEqual(fsops.fix_nav_anchors(d, "index.html"), 5)
+            page = fsops.read_file(d, "index.html")
+            for href in ('href="#home">Home', 'href="#about">About', 'href="#speakers">Speakers',
+                         'href="#footer">Contact', 'href="#register">Register now'):
+                self.assertIn(href, page)
+            self.assertEqual(fsops.dead_nav_links(page), [])
+            self.assertEqual(fsops.fix_nav_anchors(d, "index.html"), 0)          # idempotent
+
+    def test_unmatched_nav_link_is_reported(self):
+        self.assertEqual(fsops.dead_nav_links('<nav><a href="#">Blog</a></nav><section id="home"></section>'),
+                         ['nav link "Blog" points to "#"'])
+
+    def test_colours_inside_html_follow_the_theme(self):
+        from devforge import themes
+        page = ('<style>.box{background:#fff;color:#222}</style>'
+                '<div class="card" style="background-color:#ffffff; color:#333; padding:4px">a</div>'
+                '<span style="margin:0">b</span>')
+        out, n = themes.theme_colours_html(page)
+        self.assertEqual(n, 4)
+        self.assertIn(".box{background: var(--surface);color:var(--text)}", out)
+        self.assertIn("padding:4px", out)
+        self.assertIn('style="margin:0"', out)
+        self.assertEqual(themes.theme_colours_html(out)[1], 0)
+
+    def test_fetch_must_match_a_backend_route(self):
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "index.html", '<form id="f"></form>')
+            fsops.write_file(d, "app.py", "import http.server\nclass H(http.server.BaseHTTPRequestHandler):\n"
+                                          "    def do_GET(self):\n        if self.path == '/api/stats':\n            pass\n")
+            fsops.write_file(d, "script.js", "fetch('/api/stats'); fetch('/api/register', {method: 'POST'}); fetch('/index.html');")
+            probs = fsops.consistency_check(d, ["index.html", "script.js"])
+            self.assertEqual(len(probs), 1)
+            self.assertIn('"/api/register"', probs[0]["error"])
+            self.assertNotIn("/index", probs[0]["error"])
+
+    def test_files_named_in_the_request_are_always_planned(self):
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "script.js", "let x = 1;")
+            eng = Engine(d, FakeClient([]))
+            planned = eng._add_named_files("Add a backend in a new file app.py and update script.js to call it",
+                                           [("app.py", "backend")])
+            self.assertEqual([p for p, _ in planned], ["app.py", "script.js"])      # backend first, then the script
+            self.assertIn("update", dict(planned)["script.js"])
+
+    def test_update_that_changes_nothing_is_retried(self):
+        fence = chr(96) * 3
+        old = "let count = 0;" + chr(10)
+        plan = chr(10).join(["SUMMARY: s.", "FILES:", "- script.js: counter", "NOTES:", "- x", ""])
+        calls = {"n": 0}
+
+        def coder(user):
+            calls["n"] += 1
+            body = "let count = 1;" if "IDENTICAL TO THE CURRENT FILE" in user else "let count = 0;"
+            return fence + "js" + chr(10) + body + chr(10) + fence
+
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "script.js", old)
+            eng = Engine(d, FakeClient([("Planner", plan), ("Coder", coder), ("Reviewer", "LGTM")]))
+            eng.handle_code("change the counter in script.js to start at 1")
+            self.assertIn("count = 1", fsops.read_file(d, "script.js"))
+            self.assertEqual(calls["n"], 2)
+
+    def test_cut_off_rewrite_never_deletes_half_a_file(self):
+        fence = chr(96) * 3
+        big = "".join(f"function f{i}() {{ return {i}; }}" + chr(10) for i in range(120))
+        plan = chr(10).join(["SUMMARY: s.", "FILES:", "- script.js: more", "NOTES:", "- x", ""])
+        with tempfile.TemporaryDirectory() as d:
+            fsops.write_file(d, "script.js", big)
+            eng = Engine(d, FakeClient([("Planner", plan), ("Reviewer", "LGTM"),
+                                        ("Coder", fence + "js" + chr(10) + "function f0() { return 0; }" + chr(10) + fence)]))
+            out = eng.handle_code("add a function f120 to script.js")
+            self.assertEqual(fsops.read_file(d, "script.js", 100_000), big)      # the working file is kept
+            self.assertIn("cut off", out)
+
+    def test_wrong_kind_of_content_is_caught(self):
+        from devforge.engine import _wrong_kind
+        self.assertTrue(_wrong_kind("script.js", "<!DOCTYPE html>\n<html><body></body></html>"))
+        self.assertTrue(_wrong_kind("styles.css", "<html><head></head></html>"))
+        self.assertTrue(_wrong_kind("index.html", "body { margin: 0 }"))
+        self.assertFalse(_wrong_kind("script.js", "document.addEventListener('DOMContentLoaded', () => {});"))
+        self.assertFalse(_wrong_kind("script.js", "import { a } from './a.js';\nfunction f() { return a; }"))
+        self.assertFalse(_wrong_kind("index.html", "<!DOCTYPE html><html><body><h1>x</h1></body></html>"))

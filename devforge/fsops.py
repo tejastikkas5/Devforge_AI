@@ -141,8 +141,10 @@ def parse_plan_files(plan: str, limit: int = config.MAX_PLAN_FILES) -> List[Tupl
 
 
 def order_files(files: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    rank = {".html": 0, ".htm": 0, ".css": 1, ".js": 2}
-    return sorted(files, key=lambda f: rank.get(os.path.splitext(f[0])[1].lower(), 3))
+    """Pages first, then styles, then a Python backend, then the scripts - so a script is written after the
+    backend it calls and can use its real routes."""
+    rank = {".html": 0, ".htm": 0, ".css": 1, ".py": 2, ".js": 3}
+    return sorted(files, key=lambda f: rank.get(os.path.splitext(f[0])[1].lower(), 4))
 
 
 # ---------------------------------------------------------------- static checks
@@ -485,6 +487,14 @@ def consistency_check(root: str, rels: List[str]) -> List[Dict]:
         classes.update(c.split())
     css_classes = set(re.findall(r"\.(-?[_a-zA-Z][\w-]*)", css))
     out: List[Dict] = []
+    backend, backend_src = [], ""                                     # Python server files in the project root
+    for fn in sorted(os.listdir(root)):
+        if fn.endswith(".py") and not fn.startswith("test_"):
+            code = read_file(root, fn, 400_000) or ""
+            if re.search(r"http\.server|BaseHTTPRequestHandler|flask|@app\.route|do_GET|do_POST", code):
+                backend.append(fn)
+                backend_src += code
+    backend_names = ", ".join(backend)
     kit = os.path.exists(os.path.join(root, "site.js"))              # site.js runs the menu, whatever a script does
     switch = os.path.exists(os.path.join(root, "theme-toggle.js"))   # ...and theme-toggle.js the light/dark theme
     for rel in js_files:
@@ -513,10 +523,15 @@ def consistency_check(root: str, rels: List[str]) -> List[Dict]:
             elif sel and not _styled_on(css, sel, name):
                 problems.append(f'it switches on class "{name}" on {sel} but no CSS rule styles "{sel}.{name}" '
                                 f'(or a plain ".{name}"), so nothing visible changes')
+        for path in re.findall(r"""fetch\(\s*['"`](/[\w./-]*)""", js):    # frontend -> backend routes
+            if "." in path.rsplit("/", 1)[-1]:
+                continue                                          # a static file such as /index.html, not a route
+            if backend and path.rstrip("/") and path.rstrip("/") not in backend_src:
+                problems.append(f'it calls "{path}" but the backend ({backend_names}) has no route "{path}"')
         problems = list(dict.fromkeys(problems))
         if problems:
-            out.append({"file": rel, "error": "Mismatch with the HTML/CSS: " + "; ".join(problems[:5]) +
-                        ". Use only ids and classes that exist in the HTML, or add the missing CSS rule."})
+            out.append({"file": rel, "error": "Mismatch with the HTML/CSS/backend: " + "; ".join(problems[:5]) +
+                        ". Use only ids, classes and routes that really exist, or add the missing CSS rule."})
     return out
 
 
@@ -546,3 +561,92 @@ def js_made_names(js: str) -> set:
     names.update(re.findall(r"""id=\\?["']([\w-]+)""", js))
     names.update(re.findall(r"""classList\.add\(\s*['"]([\w-]+)['"]""", js))
     return names
+
+
+# ---------------------------------------------------------------- in-page links
+_A_TAG = re.compile(r"""(<a\b[^>]*?\bhref\s*=\s*)(["'])([^"']*)\2([^>]*>)(.*?)</a>""", re.I | re.S)
+_DEAD_HREFS = ("", "#", "#!", "#0", "javascript:void(0)", "javascript:void(0);", "javascript:;")
+_SYNONYMS = {
+    "home": ("home", "hero", "top", "banner", "main"),
+    "contact": ("contact", "contact-us", "get-in-touch", "footer"),
+    "services": ("services", "features", "what-we-do"),
+    "features": ("features", "services"),
+    "products": ("products", "shop", "store", "collection", "menu"),
+    "shop": ("shop", "products", "store", "collection"),
+    "team": ("team", "speakers", "people", "about"),
+    "register": ("register", "registration", "signup", "sign-up", "join"),
+    "pricing": ("pricing", "plans", "prices"),
+}
+
+
+def _section_ids(src: str) -> List[str]:
+    """ids of page landmarks, in page order (sections, header, footer, main, divs with an id)."""
+    return re.findall(r"""<(?:section|header|footer|main|div|article|aside|form)\b[^>]*?\bid\s*=\s*["']([^"']+)["']""", src, re.I)
+
+
+def _link_target(text: str, href: str, ids: List[str]) -> Optional[str]:
+    words = re.sub(r"<[^>]+>|&[#\w]+;", " ", text).lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", words).strip("-")
+    stem = re.sub(r"[^a-z0-9]+", "-", href.split("/")[-1].split(".")[0].lstrip("#").lower()).strip("-")
+    low = {i.lower(): i for i in ids}
+    for cand in (slug, stem):
+        if not cand:
+            continue
+        if cand in low:
+            return low[cand]
+        for key, alts in _SYNONYMS.items():                        # "Home" -> #hero, "Contact" -> #footer ...
+            if cand == key or cand.startswith(key + "-"):
+                for a in alts:
+                    if a in low:
+                        return low[a]
+        for li, i in low.items():                                  # "register-now" -> #register, "about" -> #about-us
+            if len(li) >= 4 and (cand.startswith(li + "-") or li.startswith(cand + "-")):
+                return i
+    if slug in ("home", "top") or stem in ("index", "home"):
+        return ids[0] if ids else None
+    return None
+
+
+def fix_nav_anchors(root: str, rel: str) -> int:
+    """Point dead links (href="#", javascript:void(0), or #id with no such id) at the matching section
+    on the page, e.g. <a href="#">About</a> -> href="#about". Returns the number of links fixed."""
+    src = read_file(root, rel, limit=400_000)
+    if src is None:
+        return 0
+    ids = _section_ids(src)
+    all_ids = set(re.findall(r"""\bid\s*=\s*["']([^"']+)["']""", src))
+    if not ids:
+        return 0
+    count = 0
+
+    def fix(m):
+        nonlocal count
+        href = m.group(3).strip()
+        dead = href.lower() in _DEAD_HREFS or (href.startswith("#") and len(href) > 1 and href[1:] not in all_ids)
+        if not dead:
+            return m.group(0)
+        if "theme" in m.group(0).lower() or "menu-btn" in m.group(0):
+            return m.group(0)                                      # a button styled as a link, not navigation
+        target = _link_target(m.group(5), href, ids)
+        if not target:
+            return m.group(0)
+        count += 1
+        return f"{m.group(1)}{m.group(2)}#{target}{m.group(2)}{m.group(4)}{m.group(5)}</a>"
+
+    new = _A_TAG.sub(fix, src)
+    if count:
+        write_file(root, rel, new)
+    return count
+
+
+def dead_nav_links(src: str) -> List[str]:
+    """Links inside the navbar that still go nowhere (after fix_nav_anchors could not match them)."""
+    nav = " ".join(re.findall(r"(?is)<nav\b.*?</nav>", src))
+    all_ids = set(re.findall(r"""\bid\s*=\s*["']([^"']+)["']""", src))
+    out = []
+    for m in _A_TAG.finditer(nav):
+        href = m.group(3).strip()
+        if href.lower() in _DEAD_HREFS or (href.startswith("#") and len(href) > 1 and href[1:] not in all_ids):
+            label = re.sub(r"<[^>]+>", "", m.group(5)).strip()[:30]
+            out.append(f'nav link "{label}" points to "{href or "nothing"}"')
+    return out
