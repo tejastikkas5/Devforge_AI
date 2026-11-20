@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 import markdown
 from PySide6.QtCore import QDir, QProcess, QSize, QSortFilterProxyModel, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QKeyEvent, QPainter
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QKeyEvent, QLinearGradient, QPainter
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QFileSystemModel, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
                                QTextBrowser, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
@@ -25,27 +25,33 @@ from devforge.skills import MAX_INJECT_CHARS, SkillError, SkillStore
 from devforge.store import ProjectStore, add_recent, load_recent, load_settings, remove_recent, save_setting
 
 # ---------------------------------------------------------------- themes (light / dark)
+#   dark  = "Midnight Violet": deep indigo night with a violet -> blue gradient accent
+#   light = "Soft Lavender":   airy white/lavender with the same gradient accent
 PALETTES = {
     "dark": dict(
-        text="#e6e9ef", strong="#ffffff", muted="#8b93a5", faint="#6b7385", item="#c6ccd8",
-        bg="#0f1218", side="#0b0e13", panel="#0b0e13", field="#151a23",
-        sel="#1b2433", hover="#151b26", border="#262e42", scroll="#2a3347",
-        btn="#1a2030", btn_hover="#222a3d", dis_text="#5b6477", dis_bg="#141925",
-        accent="#3b82f6", primary="#2563eb", primary_hover="#3b74f0", on_primary="#ffffff", danger="#b42318",
-        selection="#264a8f", code_text="#d6deeb", inline_code="#9ecbff", link="#6ea8ff",
-        bubble_user="#1e3a8a", bubble_bot="#161c28", bubble_label="#8fb4ff",
-        progress_bg="#121722", progress_text="#9aa4b8",
-        knob="#ffffff", track_off="#3a4358"),
+        text="#e7e8f4", strong="#ffffff", muted="#8f93b4", faint="#6c7096", item="#c9cbe2",
+        bg="#0d0e19", side_top="#16163a", side_bottom="#0b0c18", panel="#0a0b15", field="#14162a", card="#13152a",
+        sel="rgba(124, 108, 255, 0.22)", hover="rgba(255, 255, 255, 0.05)", border="#252844", scroll="#30335a",
+        btn="#161830", btn_hover="#1f2242", btn_border="#2a2d52", dis_text="#5a5e84", dis_bg="#121428",
+        accent="#8b7dff", accent_text="#b9b0ff", grad1="#7c6cff", grad2="#4f8cff",
+        grad1_hover="#8f81ff", grad2_hover="#68a0ff", on_primary="#ffffff", danger="#e5484d",
+        selection="#3d3785", code_text="#dcdff6", inline_code="#bdb2ff", link="#93b4ff",
+        bubble_user="#5a4ee0", user_text="#ffffff", bubble_label_user="#ddd8ff",
+        bubble_bot="#15172c", bubble_border="#272a4a", bubble_label="#a99dff",
+        code_bg="#0b0c1a", progress_bg="#111327", progress_text="#9a9ec4",
+        knob="#ffffff", track_off="#363a63"),
     "light": dict(
-        text="#1f2430", strong="#0b0f19", muted="#5f6b80", faint="#7a8496", item="#2e3546",
-        bg="#ffffff", side="#f3f5f9", panel="#f7f8fb", field="#ffffff",
-        sel="#dfe8fb", hover="#eaeef6", border="#d3d9e4", scroll="#c3cad8",
-        btn="#eef1f6", btn_hover="#e2e7f0", dis_text="#a0a8b8", dis_bg="#f2f4f8",
-        accent="#2563eb", primary="#2563eb", primary_hover="#1d4fd8", on_primary="#ffffff", danger="#c62828",
-        selection="#bcd3fb", code_text="#1f2430", inline_code="#1d4fd8", link="#1d5fd6",
-        bubble_user="#dbe7ff", bubble_bot="#f2f4f8", bubble_label="#2f5bd3",
-        progress_bg="#f2f4f8", progress_text="#4b5568",
-        knob="#ffffff", track_off="#c3cad8"),
+        text="#1c1f35", strong="#0d0f24", muted="#686d8e", faint="#8a8fab", item="#2d3152",
+        bg="#f5f5fc", side_top="#efebff", side_bottom="#eaf0ff", panel="#ffffff", field="#ffffff", card="#ffffff",
+        sel="rgba(108, 92, 231, 0.13)", hover="rgba(40, 40, 110, 0.05)", border="#e3e3f3", scroll="#cfd1e6",
+        btn="#ffffff", btn_hover="#f3f0ff", btn_border="#e1def5", dis_text="#a7abc4", dis_bg="#f4f4fa",
+        accent="#6c5ce7", accent_text="#5b4bd8", grad1="#6c5ce7", grad2="#3b82f6",
+        grad1_hover="#7b6cf0", grad2_hover="#5293f8", on_primary="#ffffff", danger="#e5484d",
+        selection="#dcd6ff", code_text="#1c1f35", inline_code="#5b4bd8", link="#4f46e5",
+        bubble_user="#6c5ce7", user_text="#ffffff", bubble_label_user="#e7e3ff",
+        bubble_bot="#ffffff", bubble_border="#e4e4f4", bubble_label="#6c5ce7",
+        code_bg="#f4f2ff", progress_bg="#f6f5fd", progress_text="#555a7c",
+        knob="#ffffff", track_off="#d2d4e8"),
 }
 THEME = {"name": "dark"}        # the active theme; changed by MainWindow.set_theme
 
@@ -55,62 +61,87 @@ def pal() -> Dict[str, str]:
 
 
 STYLE_TMPL = Template("""
-* { font-family: 'Segoe UI', sans-serif; font-size: 10pt; color: $text; }
+* { font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif; font-size: 10pt; color: $text; }
 QMainWindow, QWidget#root { background: $bg; }
-QWidget#sidebar { background: $side; }
-QLabel#brand { font-size: 14pt; font-weight: 600; padding: 4px 2px; }
+QWidget#sidebar { background: qlineargradient(x1:0, y1:0, x2:0.35, y2:1, stop:0 $side_top, stop:1 $side_bottom);
+                  border-right: 1px solid $border; }
+QLabel#brand { font-size: 15pt; font-weight: 700; padding: 4px 2px; color: $strong; letter-spacing: 0.3px; }
 QLabel#muted { color: $muted; }
+
+/* projects & chats list */
 QTreeWidget { background: transparent; border: none; outline: none; }
-QTreeWidget::item { padding: 5px 4px; border-radius: 6px; color: $item; }
+QTreeWidget::item { padding: 6px 4px; border-radius: 9px; color: $item; }
 QTreeWidget::item:selected { background: $sel; color: $strong; }
-QTreeWidget::item:hover { background: $hover; }
+QTreeWidget::item:hover:!selected { background: $hover; }
 QListWidget { background: transparent; border: none; outline: none; }
-QListWidget::item { padding: 8px 10px; border-radius: 6px; color: $item; }
+QListWidget::item { padding: 8px 10px; border-radius: 9px; color: $item; }
 QListWidget::item:selected { background: $sel; color: $strong; }
-QListWidget::item:hover { background: $hover; }
-QPushButton { background: $btn; border: 1px solid $border; border-radius: 6px; padding: 7px 14px; }
-QPushButton:hover { background: $btn_hover; }
-QPushButton:disabled { color: $dis_text; background: $dis_bg; }
-QPushButton#primary { background: $primary; border: none; font-weight: 600; color: $on_primary; }
-QPushButton#primary:hover { background: $primary_hover; }
-QPushButton#danger { background: $danger; border: none; font-weight: 600; color: #ffffff; }
-QPushButton#tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0;
-                  padding: 8px 16px; color: $muted; font-weight: 600; }
-QPushButton#tab:checked { color: $strong; border-bottom: 2px solid $accent; }
-QPushButton#tab:hover:!checked { color: $item; }
+QListWidget::item:hover:!selected { background: $hover; }
+
+/* buttons */
+QPushButton { background: $btn; border: 1px solid $btn_border; border-radius: 10px; padding: 7px 14px; font-weight: 500; }
+QPushButton:hover { background: $btn_hover; border: 1px solid $accent; }
+QPushButton:pressed { background: $sel; }
+QPushButton:disabled { color: $dis_text; background: $dis_bg; border: 1px solid $border; }
+QPushButton#primary { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 $grad1, stop:1 $grad2);
+                      border: none; border-radius: 10px; font-weight: 600; color: $on_primary; }
+QPushButton#primary:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 $grad1_hover, stop:1 $grad2_hover); }
+QPushButton#primary:pressed { background: $grad1; }
+QPushButton#danger { background: $danger; border: none; border-radius: 10px; font-weight: 600; color: #ffffff; }
+QPushButton#danger:hover { background: #f05a5f; }
+
+/* Chat / Code switch: pill tabs */
+QPushButton#tab { background: transparent; border: none; border-radius: 10px; padding: 7px 16px;
+                  color: $muted; font-weight: 600; }
+QPushButton#tab:checked { background: $sel; color: $accent_text; }
+QPushButton#tab:hover:!checked { background: $hover; color: $item; }
+
+/* text areas */
 QTextBrowser, QPlainTextEdit { background: $bg; border: none; selection-background-color: $selection; }
 QDialog { background: $bg; }
-QMenu { background: $field; border: 1px solid $border; }
-QMenu::item:selected { background: $sel; }
-QToolTip { background: $field; color: $text; border: 1px solid $border; }
-QLineEdit { background: $field; border: 1px solid $border; border-radius: 8px; padding: 7px 10px; }
+QMenu { background: $card; border: 1px solid $border; border-radius: 10px; padding: 5px; }
+QMenu::item { padding: 6px 18px; border-radius: 7px; }
+QMenu::item:selected { background: $sel; color: $strong; }
+QToolTip { background: $card; color: $text; border: 1px solid $border; border-radius: 6px; padding: 4px 8px; }
+QLineEdit { background: $field; border: 1px solid $border; border-radius: 10px; padding: 7px 10px; }
 QLineEdit:focus { border: 1px solid $accent; }
-QPlainTextEdit#skilltext { background: $field; border: 1px solid $border; border-radius: 8px; padding: 8px; }
+QPlainTextEdit#skilltext { background: $field; border: 1px solid $border; border-radius: 12px; padding: 8px; }
 QPlainTextEdit#skilltext:focus { border: 1px solid $accent; }
-QPlainTextEdit#input { background: $field; border: 1px solid $border; border-radius: 10px; padding: 8px; }
-QPlainTextEdit#input:focus { border: 1px solid $accent; }
-QPlainTextEdit#code, QPlainTextEdit#output { background: $panel; font-family: Consolas, 'Cascadia Mono', monospace; }
-QTreeView { background: $panel; border: none; outline: none; }
-QTreeView::item { padding: 3px; }
+QPlainTextEdit#input { background: $field; border: 1px solid $border; border-radius: 14px; padding: 10px; }
+QPlainTextEdit#input:focus { border: 1.5px solid $accent; }
+
+/* code side: rounded cards */
+QPlainTextEdit#code, QPlainTextEdit#output { background: $panel; border: 1px solid $border; border-radius: 12px;
+                                             padding: 6px; font-family: 'Cascadia Code', Consolas, monospace; }
+QTreeView { background: $panel; border: 1px solid $border; border-radius: 12px; outline: none; padding: 4px; }
+QTreeView::item { padding: 4px; border-radius: 7px; }
+QTreeView::item:hover:!selected { background: $hover; }
 QTreeView::item:selected { background: $sel; color: $strong; }
-QTreeWidget { background: transparent; }
-QSplitter::handle { background: $border; }
+QTreeWidget { background: transparent; border: none; padding: 0; }
+QSplitter::handle { background: transparent; }
 QSplitter::handle:horizontal { width: 2px; }
 QSplitter::handle:vertical { height: 2px; }
-QScrollBar:vertical { background: transparent; width: 10px; }
-QScrollBar::handle:vertical { background: $scroll; border-radius: 5px; min-height: 30px; }
+
+/* slim scrollbars */
+QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
+QScrollBar::handle:vertical { background: $scroll; border-radius: 3px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: $accent; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
-QScrollBar:horizontal { background: transparent; height: 10px; }
-QScrollBar::handle:horizontal { background: $scroll; border-radius: 5px; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+QScrollBar:horizontal { background: transparent; height: 8px; margin: 2px; }
+QScrollBar::handle:horizontal { background: $scroll; border-radius: 3px; }
+QScrollBar::handle:horizontal:hover { background: $accent; }
 """)
 
 DOC_CSS_TMPL = Template("""
-body { color: $text; font-family: 'Segoe UI'; font-size: 10pt; }
+body { color: $text; font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 10pt; }
 p { margin: 4px 0; } li { margin: 2px 0; }
-pre { background-color: $panel; color: $code_text; padding: 8px; font-family: Consolas, monospace; font-size: 9.5pt; }
-code { background-color: $panel; color: $inline_code; font-family: Consolas, monospace; }
-a { color: $link; } th, td { padding: 4px 8px; border: 1px solid $scroll; }
+pre { background-color: $code_bg; color: $code_text; padding: 10px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 9.5pt; }
+code { background-color: $code_bg; color: $inline_code; font-family: 'Cascadia Code', Consolas, monospace; }
+a { color: $link; } th, td { padding: 5px 9px; border: 1px solid $bubble_border; }
+th { background-color: $code_bg; }
 h1, h2, h3 { color: $strong; }
+b, strong { color: $strong; }
 """)
 
 
@@ -142,10 +173,18 @@ class ToggleSwitch(QCheckBox):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         r = self.rect().adjusted(1, 1, -1, -1)
-        painter.setBrush(QColor(p["primary"] if self.isChecked() else p["track_off"]))
+        if self.isChecked():               # gradient track, same as the primary buttons
+            g = QLinearGradient(r.left(), 0, r.right(), 0)
+            g.setColorAt(0, QColor(p["grad1"]))
+            g.setColorAt(1, QColor(p["grad2"]))
+            painter.setBrush(g)
+        else:
+            painter.setBrush(QColor(p["track_off"]))
         painter.drawRoundedRect(r, r.height() / 2, r.height() / 2)
         d = r.height() - 6
         x = r.right() - d - 3 if self.isChecked() else r.left() + 3
+        painter.setBrush(QColor(0, 0, 0, 40))          # soft knob shadow
+        painter.drawEllipse(x, r.top() + 4, d, d)
         painter.setBrush(QColor(p["knob"]))
         painter.drawEllipse(x, r.top() + 3, d, d)
         painter.end()
@@ -249,11 +288,16 @@ class ChatView(QTextBrowser):
 
     def _bubble(self, who: str, body_html: str, user: bool) -> str:
         p = pal()
-        bg, label = (p["bubble_user"], "You") if user else (p["bubble_bot"], who)
         align = "right" if user else "left"
         width = "80%" if user else "96%"
-        return (f'<table align="{align}" width="{width}" cellspacing="0" cellpadding="10" style="margin-bottom:10px">'
-                f'<tr><td bgcolor="{bg}"><span style="color:{p["bubble_label"]};font-size:8.5pt"><b>{html.escape(label)}</b></span><br>'
+        if user:      # solid accent bubble with white text
+            bg, lab, fg = p["bubble_user"], p["bubble_label_user"], p["user_text"]
+            body_html = f'<span style="color:{fg}">{body_html}</span>'
+        else:         # soft card that stands out from the background
+            bg, lab = p["bubble_bot"], p["bubble_label"]
+        return (f'<table align="{align}" width="{width}" cellspacing="0" cellpadding="12" border="0" '
+                f'style="margin-bottom:12px">'
+                f'<tr><td bgcolor="{bg}"><b style="color:{lab};font-size:8.5pt">{html.escape("You" if user else who)}</b><br>'
                 f'{body_html}</td></tr></table><br clear="all">')
 
     def _flush(self):
