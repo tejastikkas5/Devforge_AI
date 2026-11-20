@@ -24,6 +24,11 @@ from devforge.memory import MAX_NOTES, MemoryStore
 from devforge.skills import MAX_INJECT_CHARS, SkillError, SkillStore
 from devforge.store import ProjectStore, add_recent, load_recent, load_settings, remove_recent, save_setting
 
+try:            # modern HTML chat view; falls back to the simple QTextBrowser view if Qt WebEngine is missing
+    from devforge.ui.chat_web import WebChatView
+except ImportError:      # pragma: no cover
+    WebChatView = None
+
 # ---------------------------------------------------------------- themes (light / dark)
 #   dark  = "Midnight Violet": deep indigo night with a violet -> blue gradient accent
 #   light = "Soft Lavender":   airy white/lavender with the same gradient accent
@@ -645,7 +650,8 @@ class MainWindow(QMainWindow):
         chat_w = QWidget()
         chl = QVBoxLayout(chat_w)
         chl.setContentsMargins(16, 8, 12, 12)
-        self.view = ChatView()
+        self.view = (WebChatView(pal, lambda: THEME["name"] == "dark") if WebChatView and not os.environ.get("DEVFORGE_BASIC_CHAT")
+                     else ChatView())
         self.input = PromptEdit()
         self.input.setObjectName("input")
         self.input.setFixedHeight(76)
